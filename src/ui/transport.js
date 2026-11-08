@@ -1,10 +1,11 @@
 // Top bar: transport buttons, tempo/grid fields, position readout, master meter.
 
 import { $, clamp, fmtBBT, fmtTime, popupMenu, toast } from "../util.js";
-import { bus, changed, pushUndo, state } from "../state.js";
+import { bus, changed, newClip, pushUndo, state } from "../state.js";
 import { engine } from "../audio/engine.js";
+import { input } from "../audio/input.js";
 import { assetFromBuffer } from "../assets.js";
-import { dropAssetAt, scrollToPlayhead } from "./timeline.js";
+import { scrollToPlayhead } from "./timeline.js";
 import { exportMenu, projectMenu } from "../project.js";
 
 let follow = true;
@@ -56,6 +57,16 @@ export function initTransport() {
     changed("view", false);
   });
 
+  // Anything that stops the transport mid-take (loading a session, the device
+  // going away) finishes the take rather than dropping it.
+  engine.onRecordStop = () => void finishRecording();
+  input.onLost = () => {
+    if (engine.recording) {
+      toast("Input device disconnected — take saved up to here", "err", 5000);
+      finishRecording();
+    }
+  };
+
   bus.on("project", syncFields);
   bus.on("loop", syncButtons);
   bus.on("history", syncButtons);
@@ -65,6 +76,7 @@ export function initTransport() {
 
 export function togglePlay() {
   engine.ensure();
+  if (engine.recording) finishRecording();
   if (engine.playing) engine.pause();
   else engine.play(state.playhead);
   syncButtons();
@@ -97,23 +109,69 @@ async function toggleRecord() {
   if (!armed.length) return toast("Arm a track first (● on the track header)", "err");
   try {
     engine.ensure();
-    await engine.startRecording(false);
-    if (!engine.playing) engine.play(state.playhead);
+    await input.startCapture(armed);
+    // Restart if already rolling, so the take's timing starts from a logged
+    // segment (and a loop in progress is set aside).
+    if (engine.playing) engine.invalidate();
+    else engine.play(state.playhead);
     syncButtons();
-    toast("Recording…", "ok");
+    const where = input.fellBack ? " (saved device missing — using the default)" : "";
+    const loopNote = state.project.loop.enabled ? " · loop off while recording" : "";
+    toast(`Recording ${armed.length > 1 ? `${armed.length} tracks` : armed[0].name} from ${input.deviceLabel}${where}${loopNote}`, "ok", 3500);
   } catch (err) {
-    toast(`Microphone unavailable: ${err.message}`, "err", 5000);
+    syncButtons();
+    toast(`Can't record: ${err.message || err.name}. Check Project ▾ → Audio setup…`, "err", 6000);
   }
 }
 
-async function finishRecording() {
-  const result = engine.stopRecording();
+let finishing = null;
+
+/** End the take and drop one clip per armed track. Safe to call twice. */
+function finishRecording() {
+  if (!engine.recording) return finishing;
+  const proj = state.project;
+  const pending = input.stopCapture(); // ends the take synchronously
   syncButtons();
-  if (!result) return;
-  const track = state.project.tracks.find((t) => t.armed) ?? state.project.tracks[0];
-  const asset = await assetFromBuffer(`Take ${new Date().toLocaleTimeString()}`, result.buffer);
-  dropAssetAt(asset.id, track.id, result.startPos);
-  toast(`Recorded ${result.buffer.duration.toFixed(1)}s`, "ok");
+  finishing = placeTakes(pending, proj).finally(() => (finishing = null));
+  return finishing;
+}
+
+async function placeTakes(pending, proj) {
+  let takes;
+  try {
+    takes = await pending;
+  } catch (err) {
+    console.error(err);
+    return toast(`Recording failed: ${err.message}`, "err", 5000);
+  }
+  if (!takes.length) return toast("Nothing was recorded", "err");
+
+  const ctx = engine.ensure();
+  const stamp = new Date().toLocaleTimeString();
+  const made = [];
+  for (const take of takes) {
+    const track = proj.tracks.find((t) => t.id === take.trackId);
+    const buffer = ctx.createBuffer(take.channels.length, take.channels[0].length, take.sampleRate);
+    take.channels.forEach((d, c) => buffer.copyToChannel(d, c));
+    const name = takes.length > 1 && track ? `Take ${stamp} · ${track.name}` : `Take ${stamp}`;
+    made.push({ asset: await assetFromBuffer(name, buffer), track, startPos: take.startPos });
+  }
+
+  // The session was swapped out mid-take: keep the audio, don't guess where.
+  if (state.project !== proj) return toast("Take saved to the pool", "ok");
+
+  pushUndo("record");
+  state.selection.clear();
+  for (const { asset, track, startPos } of made) {
+    if (!track) continue;
+    const clip = newClip(asset.id, track.id, startPos);
+    state.project.clips.push(clip);
+    state.selection.add(clip.id);
+  }
+  changed("clips");
+  engine.invalidate();
+  const secs = made[0].asset.duration;
+  toast(`Recorded ${secs.toFixed(1)}s${made.length > 1 ? ` on ${made.length} tracks` : ""}`, "ok");
 }
 
 export function setFollow(v) {

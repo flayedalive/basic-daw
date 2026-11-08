@@ -4,6 +4,7 @@
 import { $, el, popupMenu, drag, clamp, coalesce, uid, TRACK_COLORS, fmtDb } from "../util.js";
 import { bus, changed, newTrack, pushUndo, state, trackById } from "../state.js";
 import { engine } from "../audio/engine.js";
+import { DEFAULT_INPUT, input, inputChoices, inputLabel } from "../audio/input.js";
 import { fader, meterBar } from "./controls.js";
 import { registerTracksApi, draw as drawTimeline, view, viewportHeight } from "./timeline.js";
 
@@ -101,6 +102,35 @@ function trackMenu(track) {
         changed("tracks");
       },
     },
+    ...(track ? recordMenu(track) : []),
+  ];
+}
+
+/** Input choice and monitoring, right where the arm button is. */
+function recordMenu(track) {
+  const current = String(track.input ?? DEFAULT_INPUT);
+  return [
+    "-",
+    { title: "Record from" },
+    ...inputChoices(input.channels || 2).map((c) => ({
+      label: c.label,
+      checked: c.value === current,
+      onClick: () => {
+        pushUndo("track input");
+        track.input = c.value;
+        changed("mix");
+      },
+    })),
+    {
+      label: "Monitor input",
+      checked: !!track.monitor,
+      onClick: () => {
+        pushUndo("monitor");
+        track.monitor = !track.monitor;
+        changed("mix");
+      },
+    },
+    { label: "Audio setup…", onClick: () => import("./audio-setup.js").then((m) => m.audioSetup()) },
   ];
 }
 
@@ -171,7 +201,7 @@ function buildHead(track, index, top) {
 
   const mBtn = toggle("M", track.mute, "on-m", () => setFlag(track, "mute", !track.mute), "Mute");
   const sBtn = toggle("S", track.solo, "on-s", () => setFlag(track, "solo", !track.solo), "Solo");
-  const rBtn = toggle("●", track.armed, "on-r", () => setFlag(track, "armed", !track.armed), "Arm for recording");
+  const rBtn = toggle("●", track.armed, "on-r", () => setFlag(track, "armed", !track.armed), armTitle(track));
   const row1 = el("div.row1", null, swatch, name, dbLabel);
   const row2 = el("div.row2", null, mBtn, sBtn, rBtn, el("div.minifader", null, vol.root), meter.root);
   rows.set(track.id, { swatch, name, dbLabel, meter, vol, mBtn, sBtn, rBtn });
@@ -216,6 +246,9 @@ function buildHead(track, index, top) {
   );
   return head;
 }
+
+const armTitle = (track) =>
+  `Arm for recording · ${inputLabel(track.input)}${track.monitor ? " · monitoring" : ""} (right-click to change)`;
 
 function setFlag(track, key, value) {
   pushUndo(key);
@@ -266,6 +299,7 @@ function syncValues() {
     r.mBtn.classList.toggle("on-m", track.mute);
     r.sBtn.classList.toggle("on-s", track.solo);
     r.rBtn.classList.toggle("on-r", track.armed);
+    r.rBtn.title = armTitle(track);
   }
 }
 

@@ -1204,3 +1204,27 @@ input[type="number"]::-webkit-inner-spin-button {
   border-left: 2px solid var(--border-lt);
   font-style: italic;
 }
+
+/* ── audio setup ─────────────────────────────────────────────────────── */
+.as-meter {
+  height: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.as-meter i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, var(--good) 0%, var(--good) 70%, var(--accent2) 88%, var(--danger) 100%);
+}
+.prow .val.clip {
+  color: var(--danger);
+}
+.dialog .sec {
+  margin-bottom: 0;
+}
+.dialog .prow > label {
+  width: 72px;
+}

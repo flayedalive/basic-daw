@@ -92,6 +92,7 @@ export function projectMenu(anchor) {
     { label: "Export bundle (with audio)", onClick: () => exportProjectFile(true) },
     { label: "Import project file…", onClick: () => $("#proj-input").click() },
     "-",
+    { label: "Audio setup…", onClick: () => import("./ui/audio-setup.js").then((m) => m.audioSetup()) },
     { label: "Plugins…", onClick: () => import("./ui/plugins.js").then((m) => m.pluginManager()) },
     { label: "Storage…", onClick: () => storageDialog() },
   ];

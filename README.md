@@ -60,7 +60,20 @@ Everything runs client-side, so nothing you import ever leaves your machine.
 
 **Transport & recording**
 - Sample-accurate look-ahead scheduling, bar-accurate looping, metronome
-- Record from any input device onto armed tracks (raw float capture, not Opus)
+- Record onto armed tracks (raw float capture, not Opus) — several at once,
+  each from its own interface input: track 1 from In 1, track 2 from In 2, a
+  keyboard on In 3+4 as a stereo pair
+- Project ▾ → Audio setup… picks the input and output device (output where the
+  browser allows it, Chrome/Edge), shows a level meter per input, and sets the
+  latency compensation
+- Takes are shifted back by the round-trip latency so they land where you
+  played them; **Calibrate** measures it by playing clicks through an
+  output-to-input loop and timing them on the way back
+- Input monitoring through the track's inserts, fader and pan
+- Right-click a track header to choose its input and toggle monitoring
+- No ASIO and nothing to install: interfaces are reached through their standard
+  system driver (WASAPI / Core Audio), with the browser's call processing (echo
+  cancellation, noise suppression, auto gain) turned off
 
 **Export**
 - Bounce the master, the loop region, or the selection to 16/24-bit or 32-bit
@@ -97,6 +110,7 @@ src/
   project.js          save/open/export, bounce dialogs
   audio/
     engine.js         AudioContext graph, transport, look-ahead scheduler
+    input.js          input devices, monitoring, take capture, latency calibration
     effects.js        insert chain wiring (buildChain / disposeChain)
     render.js         OfflineAudioContext bounce, normalize, analysis
     peaks.js          min/max peak pyramid + waveform drawing
@@ -121,6 +135,7 @@ src/
     controls.js       knob, fader, slider row, meter widgets
     keys.js           keyboard map (and the help dialog that documents it)
     plugins.js        the plugin manager dialog
+    audio-setup.js    the audio setup dialog: devices, input meters, latency
 ```
 
 Three design rules hold the thing together:
@@ -187,12 +202,19 @@ There is a `/daw-plugin` skill that walks an agent through designing one to spec
   together. There is no phase vocoder.
 - Overlapping clips on one track both play; no automatic crossfade.
 - No parameter automation lanes yet — mixer moves are static per session.
+- Recording sets the loop aside: a take runs linearly from where it started,
+  and the loop comes back when you stop. No take lanes or comping yet.
+- How many inputs you see depends on the browser; some only open the first two
+  channels of a multi-input interface.
+- A browser's capture delay can settle differently each time the device is
+  opened. The input stays open while any track is armed, so arm first, then
+  calibrate, then record.
 - Storage is per-origin browser storage. Export a bundle before clearing site
   data, and don't expect a session to follow you between browsers.
 
 ## Poking at it
 
-The app exposes itself on `window.daw` (`state`, `engine`, `assets`, `timeline`,
+The app exposes itself on `window.daw` (`state`, `engine`, `input`, `assets`, `timeline`,
 `tracks`, `mixer`-side modules, `project`, `effects`, `plugins`, `render`,
 `undo`, `redo`)
 so you can drive it from the console:

@@ -36,7 +36,8 @@ class Engine {
     this.metronome = false;
     this.fxSignature = "";
     this.onTick = null; // main.js hooks the UI refresh here
-    this.recorder = null;
+    this.recLog = null; // segments walked while recording (audio/input.js reads them)
+    this.onRecordStop = null; // transport finishes the take before a stop
     this.preview = null;
   }
 
@@ -205,10 +206,13 @@ class Engine {
     this.ensure();
     if (this.playing) return;
     const loop = state.project.loop;
+    // A take is laid down linearly; the loop region comes back when it ends.
+    const looping = loop.enabled && !this.recording;
     let pos = from;
-    if (loop.enabled && (pos < loop.start || pos >= loop.end)) pos = loop.start;
+    if (looping && (pos < loop.start || pos >= loop.end)) pos = loop.start;
     const start = this.ctx.currentTime + 0.06; // small pad so the first clips land cleanly
-    this.segments = [makeSegment(start, pos, loop.enabled ? loop.end : Infinity)];
+    this.segments = [makeSegment(start, pos, looping ? loop.end : Infinity)];
+    this.recLog?.push(this.segments[0]);
     this.playStart = pos;
     this.sched = { pos, ctxTime: start, segIndex: 0, straddle: true, lastBeat: -1 };
     this.playing = true;
@@ -225,12 +229,16 @@ class Engine {
   /** Stop parks the playhead where playback began; stopping twice returns to zero. */
   stop() {
     const wasPlaying = this.playing;
+    if (this.recording) this.onRecordStop?.();
     this.halt();
-    if (this.recording) this.stopRecording();
     state.playhead = wasPlaying ? (this.playStart ?? 0) : 0;
   }
 
   halt() {
+    // A restart mid-take (an edit, a loop toggle) leaves a gap; close the
+    // segment here so the take is not stretched across it.
+    const open = this.segments.at(-1);
+    if (this.recLog && open && this.ctx) open.ctxEnd = Math.min(open.ctxEnd, this.ctx.currentTime);
     clearInterval(this.timer);
     this.timer = null;
     this.playing = false;
@@ -240,6 +248,7 @@ class Engine {
   }
 
   seek(pos) {
+    if (this.recording) return; // a take stays where it started
     const p = Math.max(0, pos);
     if (this.playing) {
       this.halt();
@@ -303,8 +312,9 @@ class Engine {
     while (this.segments.length > 1 && this.segments[0].ctxEnd < ctx.currentTime - 1) this.segments.shift();
     this.sched.segIndex = this.segments.length - 1;
 
-    // When not looping, stop once everything scheduled has played out.
-    if (!state.project.loop.enabled) {
+    // When not looping, stop once everything scheduled has played out —
+    // unless recording, where running past the last clip is the point.
+    if (!state.project.loop.enabled && !this.recording) {
       const end = projectEnd();
       if (this.position > end + 0.25 && this.sources.size === 0) {
         state.playhead = end;
@@ -445,78 +455,6 @@ class Engine {
     }
     this.preview = null;
   }
-
-  /* ── recording ─────────────────────────────────────────────────────── */
-
-  /** Capture raw float frames from the default input into memory. */
-  async startRecording(monitor = false) {
-    this.ensure();
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-    });
-    const ctx = this.ctx;
-    const src = ctx.createMediaStreamSource(stream);
-    const chunks = [[], []];
-    let frames = 0;
-    let node;
-
-    const push = (l, r) => {
-      chunks[0].push(l);
-      chunks[1].push(r ?? l);
-      frames += l.length;
-    };
-
-    try {
-      await ctx.audioWorklet.addModule(recorderWorkletUrl());
-      node = new AudioWorkletNode(ctx, "daw-recorder", { numberOfOutputs: 1 });
-      node.port.onmessage = (e) => push(e.data[0], e.data[1]);
-    } catch {
-      // Older engines / blocked blob workers: ScriptProcessor still works.
-      node = ctx.createScriptProcessor(4096, 2, 2);
-      node.onaudioprocess = (e) => {
-        const inp = e.inputBuffer;
-        push(new Float32Array(inp.getChannelData(0)), new Float32Array(inp.getChannelData(Math.min(1, inp.numberOfChannels - 1))));
-      };
-    }
-
-    const sink = ctx.createGain();
-    sink.gain.value = 0;
-    src.connect(node).connect(sink).connect(ctx.destination);
-    if (monitor) src.connect(this.master.input);
-
-    this.recorder = { stream, src, node, sink, chunks, get frames() { return frames; }, monitor, startPos: state.playhead };
-    this.recording = true;
-    return this.recorder;
-  }
-
-  /** Stop capture and hand back an AudioBuffer of what was recorded. */
-  stopRecording() {
-    const r = this.recorder;
-    this.recording = false;
-    this.recorder = null;
-    if (!r) return null;
-    try {
-      r.src.disconnect();
-      r.node.disconnect();
-      r.sink.disconnect();
-      r.node.port?.postMessage("stop");
-      r.stream.getTracks().forEach((t) => t.stop());
-    } catch {
-      /* teardown best effort */
-    }
-    const total = r.chunks[0].reduce((n, c) => n + c.length, 0);
-    if (total === 0) return null;
-    const buf = this.ctx.createBuffer(2, total, this.ctx.sampleRate);
-    for (let ch = 0; ch < 2; ch++) {
-      const out = buf.getChannelData(ch);
-      let off = 0;
-      for (const c of r.chunks[ch]) {
-        out.set(c, off);
-        off += c.length;
-      }
-    }
-    return { buffer: buf, startPos: r.startPos };
-  }
 }
 
 /* ── helpers ──────────────────────────────────────────────────────────── */
@@ -607,27 +545,6 @@ export function scheduleClipEnvelope(param, clip, fromPos, untilPos, when) {
       param.setValueCurveAtTime(fadeCurve(clip.fadeShape, base, 0), at, dur);
     }
   }
-}
-
-let workletUrl = null;
-function recorderWorkletUrl() {
-  if (workletUrl) return workletUrl;
-  const code = `
-    class DawRecorder extends AudioWorkletProcessor {
-      process(inputs) {
-        const inp = inputs[0];
-        if (inp && inp.length) {
-          const l = new Float32Array(inp[0]);
-          const r = inp.length > 1 ? new Float32Array(inp[1]) : l;
-          this.port.postMessage([l, r], [l.buffer, r.buffer === l.buffer ? undefined : r.buffer].filter(Boolean));
-        }
-        return true;
-      }
-    }
-    registerProcessor('daw-recorder', DawRecorder);
-  `;
-  workletUrl = URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
-  return workletUrl;
 }
 
 export const engine = new Engine();

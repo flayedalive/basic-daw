@@ -17,6 +17,7 @@ import {
   projectDuration,
 } from "../state.js";
 import { engine } from "../audio/engine.js";
+import { DEFAULT_INPUT, input, inputChoices, inputLabel } from "../audio/input.js";
 import { defaultParams, getPlugin, labelOf, newEffect, pluginsByCategory, resolveId } from "../plugins/registry.js";
 import { sliderRow } from "./controls.js";
 import { drawPeaks } from "../audio/peaks.js";
@@ -44,6 +45,7 @@ export function initInspector() {
   bus.on("tracks", refresh);
   bus.on("project", refresh);
   bus.on("assets", refresh);
+  bus.on("audioinput", () => mode.kind === "track" && refresh());
   render();
 }
 
@@ -395,6 +397,7 @@ function renderTrack(track) {
         btn(track.armed ? "Disarm" : "Arm", () => toggleTrack(track, "armed")),
       ),
     ),
+    recordingSection(track),
     chainSection(track.id, track),
   );
 }
@@ -420,6 +423,46 @@ function renderMaster() {
       }).root,
     ),
     chainSection("master", m),
+  );
+}
+
+/** Which interface input feeds the track, and whether you hear it while armed. */
+function recordingSection(track) {
+  const current = String(track.input ?? DEFAULT_INPUT);
+  const choices = inputChoices(input.channels || 2);
+  const sel = el("select.select.grow", {
+    onchange: (e) => {
+      pushUndo("track input");
+      track.input = e.target.value;
+      changed("mix");
+    },
+  });
+  for (const c of choices) sel.append(el("option", { value: c.value, selected: c.value === current }, c.label));
+  // A session from a machine with more inputs: keep its choice visible.
+  if (!choices.some((c) => c.value === current)) {
+    sel.append(el("option", { value: current, selected: true }, `${inputLabel(current)} — not on this device`));
+  }
+
+  const mon = el("input", {
+    type: "checkbox",
+    checked: !!track.monitor,
+    onchange: (e) => {
+      pushUndo("monitor");
+      track.monitor = e.target.checked;
+      if (track.monitor) toast("Monitoring on — use headphones to avoid feedback", "", 3500);
+      changed("mix");
+    },
+  });
+
+  return section(
+    "Recording",
+    row("Input", sel),
+    row("Monitor", mon, el("span.a-meta", null, track.armed ? "hear the input through this track" : "heard once the track is armed")),
+    el(
+      "div.btnrow",
+      null,
+      btn("Audio setup…", () => import("./audio-setup.js").then((m) => m.audioSetup())),
+    ),
   );
 }
 

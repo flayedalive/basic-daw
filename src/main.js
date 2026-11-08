@@ -14,6 +14,7 @@ import { initTransport, updateReadouts, syncButtons } from "./ui/transport.js";
 import { initKeys } from "./ui/keys.js";
 import { importProjectFile, restoreLastSession, saveProject, startAutosave } from "./project.js";
 import { initPlugins } from "./plugins/loader.js";
+import { applySavedOutput, input } from "./audio/input.js";
 
 async function boot() {
   // Plugins first: restoring a session builds insert chains, and an effect
@@ -42,12 +43,22 @@ async function boot() {
   }
 
   bus.on("project", syncButtons);
+  // Arming or monitoring a track (or loading a session) re-routes live input.
+  for (const evt of ["mix", "tracks", "project"]) bus.on(evt, () => input.syncMonitoring());
+  let lastInputError = 0;
+  bus.on("audioinput", (info) => {
+    if (!info?.error || performance.now() - lastInputError < 10000) return;
+    lastInputError = performance.now();
+    toast(`Input unavailable: ${info.error.message || info.error.name} — see Project ▾ → Audio setup…`, "err", 6000);
+  });
   startAutosave();
   frame();
 
   // The audio context can only start from a gesture; do it on the first one.
   const unlock = () => {
     engine.ensure();
+    applySavedOutput();
+    input.syncMonitoring();
     removeEventListener("pointerdown", unlock);
     removeEventListener("keydown", unlock);
   };
@@ -194,6 +205,7 @@ async function exposeDebugApi() {
     state,
     assets,
     engine,
+    input,
     bus,
     timeline,
     tracks,

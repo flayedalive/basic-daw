@@ -32,7 +32,7 @@ const KEYMAP = [
   ["Home", "Go to start"],
   ["L", "Loop on/off"],
   ["K", "Metronome"],
-  ["R", "Record onto armed tracks"],
+  ["R", "Record onto armed tracks (right-click a track header to pick its input)"],
   ["F", "Follow playhead on/off"],
   ["Editing", null],
   ["S", "Split selected clips at the playhead"],
