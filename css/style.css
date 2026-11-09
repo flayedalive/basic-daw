@@ -898,6 +898,103 @@ input[type="number"]::-webkit-inner-spin-button {
   display: block;
   cursor: crosshair;
 }
+
+/* Tuner: note, ±50 cent meter, status. Green when within the in-tune zone. */
+.tuner {
+  background: #0d0f14;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 8px 10px 6px;
+  margin: 4px 0;
+  --tn-col: var(--accent2);
+}
+.tuner.in-tune {
+  --tn-col: var(--good);
+}
+.tuner.idle,
+.tuner.held {
+  --tn-col: var(--fg-dim);
+}
+.tn-note {
+  text-align: center;
+  color: var(--tn-col);
+  line-height: 1;
+  height: 40px;
+}
+.tn-name {
+  font-size: 36px;
+  font-weight: 600;
+}
+.tn-oct {
+  font-size: 14px;
+  vertical-align: baseline;
+  margin-left: 2px;
+}
+.tn-meter {
+  position: relative;
+  height: 22px;
+  margin: 6px 6px 0;
+  border-bottom: 1px solid var(--border-lt);
+}
+.tn-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--good) 22%, transparent);
+}
+.tn-tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 6px;
+  background: var(--border-lt);
+}
+.tn-tick.major {
+  height: 12px;
+  background: var(--fg-dim);
+}
+.tn-needle {
+  position: absolute;
+  top: 0;
+  bottom: -1px;
+  width: 3px;
+  margin-left: -1px;
+  left: 50%;
+  border-radius: 2px;
+  background: var(--tn-col);
+  transition: left 70ms linear;
+}
+.tuner.idle .tn-needle {
+  opacity: 0.3;
+}
+.tn-scale {
+  position: relative;
+  height: 14px;
+  margin: 0 6px;
+  font-size: 9px;
+  color: var(--fg-dim);
+}
+.tn-scale span {
+  position: absolute;
+  transform: translateX(-50%);
+  top: 2px;
+}
+.tn-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--fg);
+  min-height: 15px;
+}
+.tn-cents {
+  color: var(--tn-col);
+}
+.tn-status {
+  font-size: 10px;
+  color: var(--fg-dim);
+  line-height: 1.5;
+  margin-top: 2px;
+}
 .clipwave {
   width: 100%;
   height: 64px;

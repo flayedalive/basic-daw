@@ -339,7 +339,7 @@ export default {
 | `output` | yes | The node feeding the next insert. May be the same node. |
 | `update(params)` | yes | Called on every parameter change. Must be cheap and click-free. |
 | `dispose()` | no | Stop oscillators and constant sources here, or they leak. |
-| `tick(dt)` | no | Called once per UI frame with seconds elapsed. Live playback only — an offline render never calls it, so anything essential to the sound must not live here. |
+| `tick(dt)` | no | Called once per UI frame with seconds elapsed. Live playback only — an offline render never calls it, so anything essential to the sound must not live here. Measurement is the safe use: the Tuner detects pitch here because nothing it learns changes the audio. |
 | `readout()` | no | A number for the inspector to display, such as gain reduction. |
 
 Declare `rebuildOn: ["someKey"]` if a parameter changes the graph's shape.
@@ -347,7 +347,7 @@ Declare `rebuildOn: ["someKey"]` if a parameter changes the graph's shape.
 Load one with a `.js` URL in the plugin manager. It asks first, because unlike a
 manifest this executes code. JS plugins are **not** persisted between sessions.
 
-The eleven built-ins in `src/plugins/builtin.js` are all JS plugins and are the
+The twelve built-ins in `src/plugins/builtin.js` are all JS plugins and are the
 best reference.
 
 ---
@@ -373,7 +373,7 @@ src/plugins/
   graph.js         manifest → live audio graph
   expr.js          the expression compiler (no eval)
   dsp.js           curves and impulse responses, shared by both tiers
-  builtin.js       the eleven effects that ship with the app
+  builtin.js       the twelve effects that ship with the app (the tuner's code is in tuner.js / pitch.js)
   loader.js        install from file / URL / text, persist to IndexedDB
   bundled/         the JSON plugins that ship with the app
 ```

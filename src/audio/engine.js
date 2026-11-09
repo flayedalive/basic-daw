@@ -186,6 +186,12 @@ class Engine {
     syncChainParams(state.project.master.fx, this.master.fxLive);
   }
 
+  /** The live instance of an insert, for UI that reads from it (the tuner). Null when bypassed or not built. */
+  liveEffect(ownerId, fxId) {
+    const live = ownerId === "master" ? this.master?.fxLive : this.tracks.get(ownerId)?.fxLive;
+    return live?.find((f) => f.id === fxId) ?? null;
+  }
+
   trackInput(trackId) {
     return this.tracks.get(trackId)?.input ?? this.master.input;
   }

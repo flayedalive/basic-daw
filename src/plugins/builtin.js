@@ -1,4 +1,4 @@
-// The eleven effects that ship with the app, as JS-tier plugins.
+// The twelve effects that ship with the app, as JS-tier plugins.
 //
 // These predate the registry and are kept in JS deliberately: several of them
 // do things the JSON tier cannot express (the gate's envelope follower needs a
@@ -18,6 +18,7 @@ import {
   makeSoftClipCurve,
   LIMIT_MAX,
 } from "./dsp.js";
+import { tunerPlugin } from "./tuner.js";
 
 const P = (key, label, min, max, def, extra = {}) => ({ key, label, min, max, def, ...extra });
 
@@ -481,4 +482,7 @@ export function registerBuiltins() {
       };
     },
   });
+
+  // Lives in its own module: the pitch detector is the bulk of it.
+  add(tunerPlugin);
 }

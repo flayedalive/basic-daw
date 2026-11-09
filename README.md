@@ -50,11 +50,11 @@ Everything runs client-side, so nothing you import ever leaves your machine.
 
 **Mixer**
 - Per-track fader, pan, mute/solo/arm, live peak meter; stereo master meter
-- Insert chains on every track and the master, twenty effects out of the box:
+- Insert chains on every track and the master, twenty-one effects out of the box:
   4-band EQ (with a live response curve), tilt EQ, filter, auto-wah, compressor,
   limiter, noise gate, delay, ping-pong echo, reverb, plate reverb, chorus,
   tremolo, saturator, tube warmth, bit crusher, wavefolder, stereo width, Haas
-  widener, trim
+  widener, trim, tuner
 - Bypass, reorder, remove per insert; parameters are smoothed, not stepped
 - New effects are plugins — write one as a JSON manifest, no code (see below)
 
@@ -70,6 +70,9 @@ Everything runs client-side, so nothing you import ever leaves your machine.
   played them; **Calibrate** measures it by playing clicks through an
   output-to-input loop and timing them on the way back
 - Input monitoring through the track's inserts, fader and pan
+- A chromatic tuner insert: put it on an armed, monitoring track to tune the
+  instrument you're plugged in with (note, cents, Hz; adjustable A4 reference;
+  optional mute while tuning). Measurement only, so it never changes a bounce
 - Right-click a track header to choose its input and toggle monitoring
 - No ASIO and nothing to install: interfaces are reached through their standard
   system driver (WASAPI / Core Audio), with the browser's call processing (echo
@@ -121,7 +124,9 @@ src/
     graph.js          JSON manifest -> live audio graph
     expr.js           expression compiler for manifests (no eval, ever)
     dsp.js            curves and impulse responses, shared by both tiers
-    builtin.js        the eleven effects written in JS
+    builtin.js        the twelve effects written in JS
+    tuner.js          the tuner insert (registered with the built-ins)
+    pitch.js          YIN pitch detection and note naming, DOM-free
     loader.js         install from file / URL / text, persist to IndexedDB
     bundled/          the nine effects written as JSON manifests
   storage/db.js       IndexedDB wrapper
@@ -136,6 +141,7 @@ src/
     keys.js           keyboard map (and the help dialog that documents it)
     plugins.js        the plugin manager dialog
     audio-setup.js    the audio setup dialog: devices, input meters, latency
+    tuner.js          the tuner's note/cents display in the effect editor
 ```
 
 Three design rules hold the thing together:

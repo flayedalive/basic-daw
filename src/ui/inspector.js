@@ -21,6 +21,7 @@ import { DEFAULT_INPUT, input, inputChoices, inputLabel } from "../audio/input.j
 import { defaultParams, getPlugin, labelOf, newEffect, pluginsByCategory, resolveId } from "../plugins/registry.js";
 import { sliderRow } from "./controls.js";
 import { drawPeaks } from "../audio/peaks.js";
+import { tunerDisplay } from "./tuner.js";
 
 let body, titleEl;
 let mode = { kind: "none" };
@@ -617,6 +618,7 @@ function renderFx() {
     // subscription per render would pile up one leak per click.
     requestAnimationFrame(() => paintResponse(canvas, def));
   }
+  if (kind === "core.tuner") parts.push(tunerDisplay(mode.ownerId, def.id));
   body.append(section(plugin.name, ...parts, ...rows));
 }
 
