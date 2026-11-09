@@ -115,9 +115,10 @@ async function toggleRecord() {
     if (engine.playing) engine.invalidate();
     else engine.play(state.playhead);
     syncButtons();
-    const where = input.fellBack ? " (saved device missing — using the default)" : "";
+    const usesMain = input.capture?.parts.some((p) => p.key === "");
+    const where = usesMain && input.fellBack ? " (saved device missing — using the default)" : "";
     const loopNote = state.project.loop.enabled ? " · loop off while recording" : "";
-    toast(`Recording ${armed.length > 1 ? `${armed.length} tracks` : armed[0].name} from ${input.deviceLabel}${where}${loopNote}`, "ok", 3500);
+    toast(`Recording ${armed.length > 1 ? `${armed.length} tracks` : armed[0].name} from ${input.captureLabel()}${where}${loopNote}`, "ok", 3500);
   } catch (err) {
     syncButtons();
     toast(`Can't record: ${err.message || err.name}. Check Project ▾ → Audio setup…`, "err", 6000);
@@ -154,7 +155,7 @@ async function placeTakes(pending, proj) {
     const buffer = ctx.createBuffer(take.channels.length, take.channels[0].length, take.sampleRate);
     take.channels.forEach((d, c) => buffer.copyToChannel(d, c));
     const name = takes.length > 1 && track ? `Take ${stamp} · ${track.name}` : `Take ${stamp}`;
-    made.push({ asset: await assetFromBuffer(name, buffer), track, startPos: take.startPos });
+    made.push({ asset: await assetFromBuffer(name, buffer), track, startPos: take.startPos, overs: countOvers(take.channels) });
   }
 
   // The session was swapped out mid-take: keep the audio, don't guess where.
@@ -171,7 +172,31 @@ async function placeTakes(pending, proj) {
   changed("clips");
   engine.invalidate();
   const secs = made[0].asset.duration;
-  toast(`Recorded ${secs.toFixed(1)}s${made.length > 1 ? ` on ${made.length} tracks` : ""}`, "ok");
+  const clipped = made.filter((m) => m.overs > 0);
+  if (clipped.length) {
+    const which = clipped.map((m) => `${m.track?.name ?? "take"} (${m.overs}×)`).join(", ");
+    toast(`Recorded ${secs.toFixed(1)}s — clipped on ${which}. Lower the input gain on your interface and record again.`, "err", 8000);
+  } else {
+    toast(`Recorded ${secs.toFixed(1)}s${made.length > 1 ? ` on ${made.length} tracks` : ""}`, "ok");
+  }
+}
+
+/**
+ * Count clipped passages: runs of two or more consecutive full-scale samples.
+ * One sample at full scale can be a legitimate peak; a flat run is the
+ * converter running out of headroom.
+ */
+export function countOvers(channels, level = 0.999) {
+  let overs = 0;
+  for (const d of channels) {
+    let run = 0;
+    for (let i = 0; i < d.length; i++) {
+      if (d[i] >= level || d[i] <= -level) {
+        if (++run === 2) overs++;
+      } else run = 0;
+    }
+  }
+  return overs;
 }
 
 export function setFollow(v) {

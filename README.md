@@ -50,6 +50,10 @@ Everything runs client-side, so nothing you import ever leaves your machine.
 
 **Mixer**
 - Per-track fader, pan, mute/solo/arm, live peak meter; stereo master meter
+- Double-click a fader or knob — or click any value readout — to type an exact
+  value (`-12`, `+3.5`, `-inf`, `L30`, `C`); Alt-click resets
+- CLIP lights on every strip and the master latch when a level reaches
+  0 dBFS; click to clear
 - Insert chains on every track and the master, twenty-one effects out of the box:
   4-band EQ (with a live response curve), tilt EQ, filter, auto-wah, compressor,
   limiter, noise gate, delay, ping-pong echo, reverb, plate reverb, chorus,
@@ -63,9 +67,14 @@ Everything runs client-side, so nothing you import ever leaves your machine.
 - Record onto armed tracks (raw float capture, not Opus) — several at once,
   each from its own interface input: track 1 from In 1, track 2 from In 2, a
   keyboard on In 3+4 as a stereo pair
-- Project ▾ → Audio setup… picks the input and output device (output where the
-  browser allows it, Chrome/Edge), shows a level meter per input, and sets the
-  latency compensation
+- …and from more than one device: a track can record from any connected input
+  device instead of the main one (an interface on one track, a USB mic on
+  another), each with its own latency calibration
+- Armed tracks meter their input, before the fader, with a CLIP badge when the
+  input hits full scale; a take that clipped says so when you stop
+- Project ▾ → Audio setup… picks the main input and the output device (output
+  where the browser allows it, Chrome/Edge), shows a level meter and clip light
+  per input on every device in use, and sets latency compensation per device
 - Takes are shifted back by the round-trip latency so they land where you
   played them; **Calibrate** measures it by playing clicks through an
   output-to-input loop and timing them on the way back
@@ -113,7 +122,7 @@ src/
   project.js          save/open/export, bounce dialogs
   audio/
     engine.js         AudioContext graph, transport, look-ahead scheduler
-    input.js          input devices, monitoring, take capture, latency calibration
+    input.js          input devices (several at once), monitoring, take capture, latency calibration
     effects.js        insert chain wiring (buildChain / disposeChain)
     render.js         OfflineAudioContext bounce, normalize, analysis
     peaks.js          min/max peak pyramid + waveform drawing
@@ -210,8 +219,12 @@ There is a `/daw-plugin` skill that walks an agent through designing one to spec
 - No parameter automation lanes yet — mixer moves are static per session.
 - Recording sets the loop aside: a take runs linearly from where it started,
   and the loop comes back when you stop. No take lanes or comping yet.
-- How many inputs you see depends on the browser; some only open the first two
-  channels of a multi-input interface.
+- How many inputs you see depends on the browser; Chrome only opens the first
+  two channels of a device. Interfaces that show up as several stereo devices
+  (e.g. "Analog 1+2", "Analog 3+4") can still record together — put tracks on
+  different devices.
+- Each device runs on its own clock. Over a long take, a track from a second
+  device can drift a few milliseconds against the main one.
 - A browser's capture delay can settle differently each time the device is
   opened. The input stays open while any track is armed, so arm first, then
   calibrate, then record.

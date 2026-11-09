@@ -21,7 +21,9 @@ export function newTrack(name, index = 0) {
     mute: false,
     solo: false,
     armed: false,
-    input: "1", // interface input(s) this track records from: "1", "2", "1+2"…
+    inputDevice: "", // "" = the main input from Audio setup; else a device id
+    inputDeviceName: "", // that device's name, for when it isn't plugged in
+    input: "1", // which of its inputs this track records from: "1", "2", "1+2"…
     monitor: false, // hear the input through this track while armed
     height: 74,
     fx: [],

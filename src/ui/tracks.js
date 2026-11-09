@@ -4,7 +4,7 @@
 import { $, el, popupMenu, drag, clamp, coalesce, uid, TRACK_COLORS, fmtDb } from "../util.js";
 import { bus, changed, newTrack, pushUndo, state, trackById } from "../state.js";
 import { engine } from "../audio/engine.js";
-import { DEFAULT_INPUT, input, inputChoices, inputLabel } from "../audio/input.js";
+import { DEFAULT_INPUT, input, inputChoices, parseInput, setTrackInput, trackInputLabel } from "../audio/input.js";
 import { fader, meterBar } from "./controls.js";
 import { registerTracksApi, draw as drawTimeline, view, viewportHeight } from "./timeline.js";
 
@@ -109,18 +109,26 @@ function trackMenu(track) {
 /** Input choice and monitoring, right where the arm button is. */
 function recordMenu(track) {
   const current = String(track.input ?? DEFAULT_INPUT);
+  const curKey = input.keyOf(track);
+  const sources = input.sources(track);
+  const items = ["-"];
+  for (const src of sources) {
+    // One device: the familiar flat list. Several: a heading per device.
+    items.push({ title: sources.length > 1 ? src.label : "Record from" });
+    for (const c of inputChoices(src.channels)) {
+      items.push({
+        label: c.label,
+        checked: src.key === curKey && c.value === current,
+        onClick: () => {
+          pushUndo("track input");
+          setTrackInput(track, src.key, c.value);
+          changed("mix");
+        },
+      });
+    }
+  }
   return [
-    "-",
-    { title: "Record from" },
-    ...inputChoices(input.channels || 2).map((c) => ({
-      label: c.label,
-      checked: c.value === current,
-      onClick: () => {
-        pushUndo("track input");
-        track.input = c.value;
-        changed("mix");
-      },
-    })),
+    ...items,
     {
       label: "Monitor input",
       checked: !!track.monitor,
@@ -197,14 +205,28 @@ function buildHead(track, index, top) {
     },
     onChange: () => changed("mix"),
   });
-  const dbLabel = el("span.a-meta", null, fmtDb(track.volumeDb));
+  const dbLabel = el("span.a-meta.db-edit", { title: "Click to type a level (or double-click the fader)", onclick: (e) => (e.stopPropagation(), vol.edit()) }, fmtDb(track.volumeDb));
 
   const mBtn = toggle("M", track.mute, "on-m", () => setFlag(track, "mute", !track.mute), "Mute");
   const sBtn = toggle("S", track.solo, "on-s", () => setFlag(track, "solo", !track.solo), "Solo");
   const rBtn = toggle("●", track.armed, "on-r", () => setFlag(track, "armed", !track.armed), armTitle(track));
-  const row1 = el("div.row1", null, swatch, name, dbLabel);
+  // Latches when this track's input (while armed) or output reaches full scale.
+  const clipBadge = el(
+    "button.clip-badge",
+    {
+      hidden: true,
+      title: "Clipped — click to clear",
+      onclick: (e) => {
+        e.stopPropagation();
+        input.resetClips(input.keyOf(track));
+        engine.resetClips(track.id);
+      },
+    },
+    "CLIP",
+  );
+  const row1 = el("div.row1", null, swatch, name, clipBadge, dbLabel);
   const row2 = el("div.row2", null, mBtn, sBtn, rBtn, el("div.minifader", null, vol.root), meter.root);
-  rows.set(track.id, { swatch, name, dbLabel, meter, vol, mBtn, sBtn, rBtn });
+  rows.set(track.id, { swatch, name, dbLabel, meter, vol, mBtn, sBtn, rBtn, clipBadge });
 
   const head = el(
     `div.thead`,
@@ -248,7 +270,7 @@ function buildHead(track, index, top) {
 }
 
 const armTitle = (track) =>
-  `Arm for recording · ${inputLabel(track.input)}${track.monitor ? " · monitoring" : ""} (right-click to change)`;
+  `Arm for recording · ${trackInputLabel(track)}${track.monitor ? " · monitoring" : ""} (right-click to change)`;
 
 function setFlag(track, key, value) {
   pushUndo(key);
@@ -304,8 +326,36 @@ function syncValues() {
 }
 
 /** Called from the UI frame loop. */
+/**
+ * Armed tracks meter their *input* — what is about to be recorded, before the
+ * fader — so levels can be set with the app's monitoring off (listening
+ * through the interface instead). Everything else meters its output.
+ */
 export function updateTrackMeters(levels) {
-  for (const [id, r] of rows) r.meter.update(levels.get(id)?.peak ?? 0);
+  const byDevice = new Map();
+  for (const [id, r] of rows) {
+    const t = trackById(id);
+    const dev = t?.armed ? input.deviceOf(t) : null;
+    let peak;
+    let clip;
+    if (dev) {
+      if (!byDevice.has(dev.key)) byDevice.set(dev.key, dev.levels());
+      const lv = byDevice.get(dev.key);
+      const chans = parseInput(t.input, dev.channels);
+      peak = Math.max(...chans.map((c) => lv[c] ?? 0));
+      clip = chans.some((c) => dev.clip[c]);
+    } else {
+      peak = levels.get(id)?.peak ?? 0;
+      clip = engine.clips.has(id);
+    }
+    r.meter.update(peak);
+    if (r.clipBadge.hidden === clip) {
+      r.clipBadge.hidden = !clip;
+      r.clipBadge.title = dev
+        ? "The input hit full scale — lower the gain on your interface (the fader can't undo it). Click to clear."
+        : "This track went over 0 dBFS — pull its fader or clip gain down. Click to clear.";
+    }
+  }
 }
 
 export { drawTimeline };

@@ -6,7 +6,7 @@ import { $, el, coalesce, popupMenu, fmtDb, clamp } from "../util.js";
 import { bus, changed, pushUndo, state, trackById } from "../state.js";
 import { engine } from "../audio/engine.js";
 import { labelOf, newEffect, pluginsByCategory } from "../plugins/registry.js";
-import { fader, knob } from "./controls.js";
+import { fader, knob, parsePan } from "./controls.js";
 import { showInspector } from "./inspector.js";
 
 let host;
@@ -102,7 +102,7 @@ function buildStrip(id) {
     isMaster ? el("div.meter-ch", null, meterR) : null,
   );
 
-  const dbLabel = el("div.s-db", null, fmtDb(t.volumeDb));
+  const dbLabel = el("div.s-db.db-edit", { title: "Click to type a level (or double-click the fader)", onclick: () => vol.edit() }, fmtDb(t.volumeDb));
   const vol = fader({
     value: t.volumeDb,
     width: 30,
@@ -126,6 +126,7 @@ function buildStrip(id) {
         def: 0,
         size: 24,
         format: (v) => (Math.abs(v) < 0.02 ? "C" : `${v < 0 ? "L" : "R"}${Math.round(Math.abs(v) * 100)}`),
+        parse: parsePan,
         onInput: (v) => {
           t.pan = v;
           engine.updateMix();
@@ -148,6 +149,19 @@ function buildStrip(id) {
         "S",
       );
 
+  const clipLed = el(
+    "button.clip-led",
+    {
+      title: isMaster
+        ? "Lights when the master reaches 0 dBFS — that clips at the interface and in a 16/24-bit bounce. Click to clear."
+        : "Lights when this track goes over 0 dBFS. Click to clear.",
+      onclick: (e) => {
+        e.stopPropagation();
+        engine.resetClips(id);
+      },
+    },
+    "CLIP",
+  );
   const mid = el("div.s-mid", null, el("div.s-fader", null, vol.root), meter);
   // The strip is a flex column inside a resizable panel: let the fader take
   // whatever height is left rather than overflowing when the mixer is short.
@@ -158,12 +172,13 @@ function buildStrip(id) {
     { dataset: { id }, onpointerdown: () => focus(id) },
     name,
     fxBox,
+    clipLed,
     mid,
     dbLabel,
     el("div.s-row", null, mBtn, sBtn, pan?.root),
   );
 
-  strips.set(id, { root, name, vol, dbLabel, meterL, meterR, mBtn, sBtn, pan, renderFx, shown: 0, shownR: 0 });
+  strips.set(id, { root, name, vol, dbLabel, meterL, meterR, mBtn, sBtn, pan, renderFx, clipLed, shown: 0, shownR: 0 });
   return root;
 }
 
@@ -286,6 +301,8 @@ export function updateMixerMeters(levels) {
   for (const [id, s] of strips) {
     const lv = levels.get(id);
     if (!lv) continue;
+    const clip = engine.clips.has(id);
+    if (s.clipLed.classList.contains("on") !== clip) s.clipLed.classList.toggle("on", clip);
     const l = meterPct(lv.peak);
     s.shown = l > s.shown ? l : s.shown * 0.86;
     s.meterL.style.height = `${(s.shown * 100).toFixed(1)}%`;

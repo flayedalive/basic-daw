@@ -34,25 +34,29 @@ export const uid = (p = "id") => `${p}_${Math.random().toString(36).slice(2, 9)}
 
 /** dB <-> linear. -Infinity dB is silence; the UI floors faders at MIN_DB. */
 export const MIN_DB = -60;
-export const dbToGain = (db) => (db <= MIN_DB ? 0 : Math.pow(10, db / 20));
+// Silence is stored as MIN_DB, never -Infinity: projects and undo snapshots go
+// through JSON, which turns -Infinity into null. A null (from an older save)
+// still reads as silence here, not as 10^(null/20) = unity gain.
+export const isSilentDb = (db) => db == null || !(db > MIN_DB);
+export const dbToGain = (db) => (isSilentDb(db) ? 0 : Math.pow(10, db / 20));
 export const gainToDb = (g) => (g <= 0.0001 ? -Infinity : 20 * Math.log10(g));
 
 /** Fader taper: 0..1 slider position <-> dB, with more resolution near 0 dB. */
 export const MAX_DB = 6;
 export function posToDb(pos) {
   const p = clamp(pos, 0, 1);
-  if (p <= 0) return -Infinity;
+  if (p <= 0) return MIN_DB; // silent; see isSilentDb
   // Exponential-ish taper: unity sits at ~0.78 of the throw, like a real fader.
   return MIN_DB + (MAX_DB - MIN_DB) * Math.pow(p, 1 / 2.2);
 }
 export function dbToPos(db) {
-  if (!isFinite(db)) return 0;
+  if (isSilentDb(db) || !isFinite(db)) return 0;
   const d = clamp(db, MIN_DB, MAX_DB);
   return Math.pow((d - MIN_DB) / (MAX_DB - MIN_DB), 2.2);
 }
 
 export function fmtDb(db) {
-  if (!isFinite(db) || db <= MIN_DB) return "-∞";
+  if (isSilentDb(db) || !isFinite(db)) return "-∞";
   return `${db > 0 ? "+" : ""}${db.toFixed(1)}`;
 }
 

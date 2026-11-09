@@ -745,9 +745,11 @@ export function zoomToFit() {
 }
 
 export function scrollToPlayhead(force = false) {
-  const x = timeToX(engine.playing ? engine.position : state.playhead);
+  const pos = engine.playing ? engine.position : state.playhead;
+  if (!Number.isFinite(pos)) return; // never scroll the view off to nowhere
+  const x = timeToX(pos);
   if (force || x > width - 60 || x < 0) {
-    view.scrollX = Math.max(0, (engine.playing ? engine.position : state.playhead) - (width * 0.25) / view.pxPerSec);
+    view.scrollX = Math.max(0, pos - (width * 0.25) / view.pxPerSec);
     changed("view", false);
   }
 }

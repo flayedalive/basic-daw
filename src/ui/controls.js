@@ -1,6 +1,7 @@
 // Reusable widgets: canvas knob, vertical fader, and the drag-a-number field.
 // All three share the same interaction: drag vertically, Shift for fine,
-// double-click (or Alt-click) to reset to the default.
+// Alt-click to reset to the default, and double-click (or click the readout)
+// to type an exact value.
 
 import { el, drag, clamp, dbToPos, posToDb, fmtDb, MIN_DB, MAX_DB } from "../util.js";
 
@@ -18,6 +19,69 @@ function fitCanvas(canvas, w, h) {
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
   c.clearRect(0, 0, w, h);
   return c;
+}
+
+/* ── typing a value ─────────────────────────────────────────────────── */
+
+let openEditor = null;
+
+/**
+ * Float a small text box over `anchor` to type an exact value.
+ * Enter or clicking away commits, Escape cancels. `parse` returns a number, or
+ * null for input it can't read (which leaves the value alone).
+ */
+export function editValue(anchor, { value, format = String, parse = parseNumber, onCommit }) {
+  openEditor?.(false);
+  const r = anchor.getBoundingClientRect();
+  const input = el("input.val-edit", { type: "text", spellcheck: false, autocomplete: "off" });
+  input.value = format(value);
+  Object.assign(input.style, {
+    left: `${Math.max(4, Math.min(innerWidth - 80, r.left + r.width / 2 - 36))}px`,
+    top: `${Math.max(4, r.top + r.height / 2 - 11)}px`,
+  });
+  document.body.append(input);
+  input.focus();
+  input.select();
+  const finish = (commit) => {
+    if (openEditor !== finish) return;
+    openEditor = null;
+    const v = commit ? parse(input.value.trim()) : null;
+    input.remove();
+    if (v != null && !Number.isNaN(v)) onCommit(v);
+  };
+  openEditor = finish;
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") finish(true);
+    else if (e.key === "Escape") finish(false);
+  });
+  input.addEventListener("blur", () => finish(true));
+}
+
+const MINUS = /[\u2212\u2013]/g; // typographic minus / en dash, as pasted from a readout
+
+export function parseNumber(text) {
+  const m = /[-+]?\d*\.?\d+(e[-+]?\d+)?/i.exec(text.replace(MINUS, "-"));
+  return m ? Number(m[0]) : null;
+}
+
+/** "-6", "−6 dB", "+2.5", "-inf" / "off" → dB, clamped to the fader's range. */
+export function parseDb(text) {
+  const t = text.replace(MINUS, "-").toLowerCase();
+  if (/^-?(inf|∞|-∞)|^off$|^mute$/.test(t) || t === "-∞") return MIN_DB; // silent
+  const v = parseNumber(t);
+  if (v == null) return null;
+  return clamp(v, MIN_DB, MAX_DB);
+}
+
+/** "C", "L30", "30L", "R15", "-30" (percent, left negative) → -1 … 1. */
+export function parsePan(text) {
+  const t = text.trim().toUpperCase();
+  if (t === "C" || t === "0" || t === "CENTER" || t === "CENTRE") return 0;
+  const n = parseNumber(t);
+  if (n == null) return null;
+  const sign = /L/.test(t) ? -1 : /R/.test(t) ? 1 : Math.sign(n);
+  return clamp((sign * Math.abs(n)) / 100, -1, 1);
 }
 
 /**
@@ -101,12 +165,22 @@ export function knob(opts) {
       () => opts.onChange?.(value),
     );
   });
-  canvas.addEventListener("dblclick", () => {
-    value = opts.def ?? opts.min;
+  const commit = (v) => {
+    value = clamp(v, opts.min, opts.max);
     paint();
     opts.onInput?.(value);
     opts.onChange?.(value);
-  });
+  };
+  const edit = () =>
+    editValue(canvas, {
+      value,
+      format: opts.format ?? ((v) => `${round(v)}`),
+      parse: opts.parse ?? parseNumber,
+      onCommit: commit,
+    });
+  canvas.addEventListener("dblclick", edit);
+  valEl.addEventListener("click", edit);
+  valEl.title = "Click to type a value";
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     const step = (e.shiftKey ? 0.002 : 0.02) * (e.deltaY > 0 ? -1 : 1);
@@ -118,6 +192,7 @@ export function knob(opts) {
   paint();
   return {
     root,
+    edit,
     set(v) {
       value = v;
       paint();
@@ -211,12 +286,19 @@ export function fader(opts) {
       () => opts.onChange?.(db),
     );
   });
-  canvas.addEventListener("dblclick", () => {
-    db = 0;
-    paint();
-    opts.onInput?.(db);
-    opts.onChange?.(db);
-  });
+  const edit = () =>
+    editValue(canvas, {
+      value: db,
+      format: (v) => (v != null && isFinite(v) && v > MIN_DB ? v.toFixed(1) : "-inf"),
+      parse: parseDb,
+      onCommit: (v) => {
+        db = v;
+        paint();
+        opts.onInput?.(db);
+        opts.onChange?.(db);
+      },
+    });
+  canvas.addEventListener("dblclick", edit);
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     db = clamp(db + (e.deltaY > 0 ? -1 : 1) * (e.shiftKey ? 0.2 : 1), MIN_DB, MAX_DB);
@@ -227,6 +309,7 @@ export function fader(opts) {
   paint();
   return {
     root: canvas,
+    edit,
     set(v) {
       db = v;
       paint();
@@ -275,6 +358,23 @@ export function sliderRow(opts) {
     input.dispatchEvent(new Event("input"));
     opts.onChange?.(fromSlider(+input.value));
   });
+  // The slider's resolution is 1/1000 of its range; typing gets exact values.
+  val.title = "Click to type a value";
+  val.classList.add("editable");
+  val.addEventListener("click", () =>
+    editValue(val, {
+      value: fromSlider(+input.value),
+      format: (v) => fmtNum(v, opts.prec),
+      parse: opts.parse ?? parseNumber,
+      onCommit: (v) => {
+        const c = clamp(v, opts.min, opts.max);
+        input.value = String(toSlider(c));
+        show(c);
+        opts.onInput?.(c);
+        opts.onChange?.(c);
+      },
+    }),
+  );
   const root = el("div.prow", null, el("label", null, opts.label), input, val);
   return { root, set: (v) => ((input.value = String(toSlider(v))), show(v)) };
 }
@@ -295,6 +395,7 @@ export function dbRow(label, value, onInput) {
     min: MIN_DB,
     max: MAX_DB,
     format: (v) => `${fmtDb(v)} dB`,
+    parse: parseDb,
     def: 0,
     onInput,
   });

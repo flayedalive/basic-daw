@@ -1,6 +1,10 @@
-// Audio input: which device to listen to, which of its channels each track
+// Audio input: which devices to listen to, which of their channels each track
 // records, hearing yourself through the track's inserts, capturing takes, and
 // measuring the round trip so a take lands where it was played.
+//
+// Tracks record from the main input (chosen in Audio setup) unless they name
+// another device — an interface and a USB mic can record side by side. Each
+// device gets its own stream, capture node and latency.
 //
 // Everything here goes through the browser's own audio stack (WASAPI on
 // Windows, Core Audio on macOS). There is no ASIO: a web page cannot load a
@@ -10,7 +14,8 @@
 //
 // Device and latency choices belong to the machine, not the session, so they
 // live in localStorage. Which input a track records from belongs to the
-// session, so it lives on the track (`track.input`, `track.monitor`).
+// session, so it lives on the track (`track.inputDevice`, `track.input`,
+// `track.monitor`).
 //
 // Timing model for a take. The capture worklet stamps every batch with the
 // context frame it was captured at. A sound the performer heard at context
@@ -34,7 +39,7 @@ const CLICK_GAP_MIN = 0.44;
 
 /* ── machine preferences ──────────────────────────────────────────────── */
 
-const DEFAULT_PREFS = { inputId: "", outputId: "", latencyMs: null };
+const DEFAULT_PREFS = { inputId: "", outputId: "", latencyMs: null, deviceLatency: {} };
 
 export function loadPrefs() {
   try {
@@ -81,32 +86,44 @@ export const inputLabel = (spec) => {
   return s.includes("+") ? `In ${s} (stereo)` : `In ${s}`;
 };
 
-/* ── the live input ───────────────────────────────────────────────────── */
+/* ── the live inputs ──────────────────────────────────────────────────── */
 
-class Input {
-  constructor() {
+/** A sample this close to full scale means the converter ran out of headroom. */
+export const CLIP_LEVEL = 0.999;
+
+/**
+ * One open capture device. The main device (key "") is whichever input is
+ * chosen in Audio setup; any other key is a browser deviceId a track points at
+ * directly (a USB mic next to the interface, say).
+ */
+class DeviceInput {
+  constructor(mgr, key) {
+    this.mgr = mgr;
+    this.key = key;
     this.stream = null;
     this.src = null;
     this.split = null;
     this.analysers = [];
     this.bufs = [];
-    this.channels = 0; // 0 until a device has been opened
-    this.deviceLabel = "";
+    this.channels = 0; // 0 until opened
+    this.label = "";
     this.deviceId = "";
     this.inputLatency = 0;
     this.fellBack = false;
     this.users = new Set();
     this.opening = null;
-    this.monitors = [];
-    this.capture = null; // active take
-    this.onLost = null; // transport hooks this to finish a take cleanly
+    this.clip = []; // per channel: hit full scale since last reset
   }
 
   get open() {
     return !!this.stream;
   }
 
-  /** Hold the input open on behalf of `user` (meter, monitor, record, calibrate). */
+  /** The id asked for: the saved choice for the main device, else the key. */
+  get requestedId() {
+    return this.key || loadPrefs().inputId;
+  }
+
   async acquire(user) {
     this.users.add(user);
     try {
@@ -120,7 +137,7 @@ class Input {
 
   release(user) {
     this.users.delete(user);
-    if (!this.users.size) this.closeDevice();
+    if (!this.users.size) this.close();
   }
 
   openDevice() {
@@ -134,16 +151,26 @@ class Input {
       throw new Error("this browser cannot capture audio (it needs https or localhost)");
     }
     const ctx = engine.ensure();
-    const { inputId } = loadPrefs();
+    const id = this.requestedId;
     let stream;
     this.fellBack = false;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: constraints(inputId) });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: constraints(id) });
     } catch (err) {
-      // A saved device that has been unplugged: fall back rather than refuse.
-      if (!inputId || !/Overconstrained|NotFound|NotReadable/.test(err.name)) throw err;
+      const missing = /Overconstrained|NotFound|NotReadable/.test(err.name);
+      // The main input falls back to the default rather than refuse; a device a
+      // track names explicitly must not silently become a different one.
+      if (this.key || !id || !missing) {
+        if (this.key && missing) throw new Error(`${this.mgr.nameOf(this.key)} isn't connected`);
+        throw err;
+      }
       stream = await navigator.mediaDevices.getUserMedia({ audio: constraints("") });
       this.fellBack = true;
+    }
+    if (!this.users.size) {
+      // Everyone let go while the permission prompt was up.
+      stream.getTracks().forEach((t) => t.stop());
+      return;
     }
 
     const track = stream.getAudioTracks()[0];
@@ -158,7 +185,7 @@ class Input {
     this.bufs = [];
     for (let c = 0; c < n; c++) {
       const a = ctx.createAnalyser();
-      a.fftSize = 1024;
+      a.fftSize = 1024; // > one 60 fps frame at 48 kHz, so no sample goes unseen
       split.connect(a, c);
       this.analysers.push(a);
       this.bufs.push(new Float32Array(a.fftSize));
@@ -168,16 +195,18 @@ class Input {
     this.src = src;
     this.split = split;
     this.channels = n;
+    this.clip = new Array(n).fill(false);
     this.deviceId = settings.deviceId ?? "";
-    this.deviceLabel = track?.label || "Default input";
+    this.label = track?.label || "Default input";
+    this.mgr.remember(this.deviceId, this.label);
     this.inputLatency = Number(settings.latency) || 0;
     track?.addEventListener("ended", () => this.lost());
-    this.syncMonitoring();
+    this.mgr.syncMonitoring();
     bus.emit("audioinput");
   }
 
-  closeDevice() {
-    this.unrouteMonitors();
+  close() {
+    this.mgr.dropMonitors(this.key);
     try {
       this.src?.disconnect();
       this.split?.disconnect();
@@ -195,24 +224,15 @@ class Input {
   /** The device went away (unplugged, permission revoked). */
   lost() {
     if (!this.stream) return;
-    this.onLost?.();
-    // Everyone lets go; the next arm or meter reopens, falling back to the
-    // default device if this one stays away.
+    if (this.mgr.capture?.parts.some((p) => p.dev === this)) this.mgr.onLost?.(this);
+    // Everyone lets go; the next arm or meter reopens it (the main input falls
+    // back to the default device if this one stays away).
     this.users.clear();
-    this.closeDevice();
-    bus.emit("audioinput", { lost: true });
+    this.close();
+    bus.emit("audioinput", { lost: true, key: this.key });
   }
 
-  /** Switch device: keep whoever was holding the input, reopen on the new one. */
-  async setInputDevice(id) {
-    if (this.capture) throw new Error("finish recording before changing the input");
-    savePrefs({ inputId: id });
-    if (!this.stream) return;
-    this.closeDevice();
-    await this.openDevice();
-  }
-
-  /** Per-channel peak, 0..1, for meters. */
+  /** Per-channel peak, 0..1, for meters. Latches `clip` on a full-scale sample. */
   levels() {
     const out = [];
     for (let c = 0; c < this.analysers.length; c++) {
@@ -222,81 +242,10 @@ class Input {
         const a = v < 0 ? -v : v;
         if (a > p) p = a;
       }
+      if (p >= CLIP_LEVEL) this.clip[c] = true;
       out.push(p);
     }
     return out;
-  }
-
-  /* ── latency ─────────────────────────────────────────────────────────── */
-
-  /** What the browser reports for the round trip, in seconds. */
-  estimatedLatency() {
-    const ctx = engine.ctx;
-    const out = (ctx?.baseLatency || 0) + (ctx?.outputLatency || 0);
-    return { output: out, input: this.inputLatency, total: out + this.inputLatency };
-  }
-
-  /** The offset applied to takes: a calibrated value if there is one, else the estimate. */
-  compensation() {
-    const { latencyMs } = loadPrefs();
-    if (latencyMs != null && isFinite(latencyMs)) return { seconds: latencyMs / 1000, source: "calibrated" };
-    return { seconds: this.estimatedLatency().total, source: "estimated" };
-  }
-
-  /* ── arming & monitoring ─────────────────────────────────────────────── */
-
-  /**
-   * Keep the device open while any track is armed, and route each armed,
-   * monitoring track's input into that track so you hear yourself through its
-   * inserts, fader and pan.
-   *
-   * Holding the input open while armed is about timing as much as speed: a
-   * browser's capture path can settle at a slightly different delay each time
-   * it is opened, so the measured latency only holds for the open it was
-   * measured on. Arm, calibrate, record — all on one open — and takes land
-   * where they were played. It also means record starts without a permission
-   * round trip.
-   */
-  syncMonitoring() {
-    if (!engine.ctx) return;
-    const armed = state.project.tracks.filter((t) => t.armed);
-    if (armed.length && !this.users.has("armed")) {
-      this.acquire("armed").catch((err) => bus.emit("audioinput", { error: err }));
-      return; // _open() calls back in here once the device is up
-    }
-    if (!armed.length && this.users.has("armed")) {
-      this.unrouteMonitors();
-      this.release("armed");
-      return;
-    }
-    if (!this.split) return;
-    const want = armed.filter((t) => t.monitor && engine.tracks.has(t.id));
-    // Mix events fire on every fader release; only rewire when routing changed.
-    // (Compared by node bundle, so a track rebuilt by undo gets rewired.)
-    const targets = want.map((t) => [engine.tracks.get(t.id), String(t.input), this.split]);
-    const same =
-      this.monTargets?.length === targets.length &&
-      targets.every((x, i) => x.every((v, j) => v === this.monTargets[i][j]));
-    if (same && this.monitors.length === want.length) return;
-    this.unrouteMonitors();
-    this.monTargets = targets;
-    for (const track of want) {
-      const node = this.tap(track.input);
-      node.connect(engine.trackInput(track.id));
-      this.monitors.push(node);
-    }
-  }
-
-  unrouteMonitors() {
-    for (const n of this.monitors) {
-      try {
-        n.disconnect();
-      } catch {
-        /* torn down */
-      }
-    }
-    this.monitors = [];
-    this.monTargets = null;
   }
 
   /** A node carrying one input (mono) or a pair (stereo) from the splitter. */
@@ -314,57 +263,11 @@ class Input {
     return m;
   }
 
-  /* ── recording ───────────────────────────────────────────────────────── */
-
-  /**
-   * Start capturing for the given armed tracks. The transport must start (or
-   * restart) playback *after* this so its segments are logged for the take.
-   */
-  async startCapture(tracks) {
-    await this.acquire("record");
-    try {
-      const tapRec = await this.recorder();
-      const roundTrip = this.compensation().seconds;
-      this.capture = {
-        tap: tapRec,
-        roundTrip,
-        // Snapshot which inputs feed which tracks: changing a track's input
-        // mid-take should not rewrite the take.
-        targets: tracks.map((t) => ({ trackId: t.id, chans: parseInput(t.input, this.channels) })),
-        sampleRate: engine.ctx.sampleRate,
-      };
-      engine.recLog = [];
-      engine.recording = true;
-      return this.capture;
-    } catch (err) {
-      this.release("record");
-      throw err;
-    }
-  }
-
-  /**
-   * Stop capturing and assemble one take per target track. The synchronous
-   * part (before the first await) ends the take *now*, so callers can stop the
-   * transport straight after without clipping or extending it.
-   */
-  async stopCapture() {
-    const cap = this.capture;
-    const log = engine.recLog ?? [];
-    this.capture = null;
-    engine.recording = false;
-    engine.recLog = null;
-    if (!cap) return [];
-    const now = engine.ctx.currentTime;
-    for (const seg of log) seg.ctxEnd = Math.min(seg.ctxEnd, now);
-    const chunks = await cap.tap.stop();
-    this.release("record");
-    return assembleTakes(chunks, log, cap);
-  }
-
-  /** Capture node over every input channel. Resolves to {stop(): Promise<chunks>}. */
+  /** Capture node over every channel of this device. Resolves to {stop(): Promise<chunks>}. */
   async recorder() {
     const ctx = engine.ctx;
     const n = this.channels;
+    const src = this.src;
     const chunks = []; // { t: context seconds of first frame, data: Float32Array[] }
     const sink = ctx.createGain();
     sink.gain.value = 0;
@@ -398,7 +301,7 @@ class Input {
         chunks.push({ t: ctx.currentTime - ib.duration, data });
       };
     }
-    this.src.connect(node);
+    src.connect(node);
     node.connect(sink);
 
     return {
@@ -409,7 +312,7 @@ class Input {
           await Promise.race([finished, new Promise((r) => setTimeout(r, 600))]);
         }
         try {
-          this.src?.disconnect(node);
+          src.disconnect(node);
         } catch {
           /* source already closed */
         }
@@ -419,21 +322,354 @@ class Input {
       },
     };
   }
+}
+
+/**
+ * Every input in use. The main device keeps the single-device API the rest of
+ * the app was written against (`input.channels`, `input.levels()` …); anything
+ * that cares about a particular track asks by key (`input.keyOf(track)`).
+ *
+ * Each device runs on its own clock and settles at its own delay, so latency
+ * is measured and applied per device, and a take records each device with its
+ * own capture node. The browser resamples every stream to the engine's rate.
+ */
+class Input {
+  constructor() {
+    this.devices = new Map(); // key -> DeviceInput
+    this.names = new Map(); // deviceId -> label, from enumerateDevices and opens
+    this.monitors = []; // { node, key }
+    this.monTargets = null;
+    this.capture = null; // active take
+    this.onLost = null; // transport hooks this to finish a take cleanly
+    navigator.mediaDevices?.addEventListener?.("devicechange", () => this.refreshDevices());
+  }
+
+  device(key = "") {
+    let d = this.devices.get(key);
+    if (!d) {
+      d = new DeviceInput(this, key);
+      this.devices.set(key, d);
+    }
+    return d;
+  }
+
+  get main() {
+    return this.device("");
+  }
+
+  /** "" for the main input (including a track naming the main input's own id). */
+  keyFor(id) {
+    if (!id) return "";
+    const main = this.devices.get("");
+    if (id === loadPrefs().inputId || (main?.open && id === main.deviceId)) return "";
+    return id;
+  }
+
+  keyOf(track) {
+    return this.keyFor(track?.inputDevice);
+  }
+
+  /** The open device a track records from, or null. */
+  deviceOf(track) {
+    const d = this.devices.get(this.keyOf(track));
+    return d?.open ? d : null;
+  }
+
+  remember(id, label) {
+    if (id && label) this.names.set(id, label);
+  }
+
+  nameOf(key) {
+    if (!key) return this.main.label || "Main input";
+    return this.devices.get(key)?.label || this.names.get(key) || "Saved device";
+  }
+
+  /** Re-read the device list (names appear once the page has mic permission). */
+  async refreshDevices() {
+    const { inputs } = await listDevices().catch(() => ({ inputs: [] }));
+    for (const d of inputs) if (!ALIAS_IDS.has(d.deviceId)) this.remember(d.deviceId, d.label);
+    this.connected = new Set(inputs.map((d) => d.deviceId));
+    bus.emit("audioinput");
+    return inputs;
+  }
+
+  /**
+   * What a track can record from, for menus: the main input, every other
+   * connected device, and the track's own saved device if it is unplugged.
+   * Channel counts are known once a device has been opened; until then a
+   * device is offered as stereo, and a choice past its last input falls back
+   * to input 1 when it opens.
+   */
+  sources(track = null) {
+    const out = [{ key: "", label: this.nameOf(""), channels: this.main.channels || 2, main: true }];
+    const seen = new Set([""]);
+    for (const [id, label] of this.names) {
+      const key = this.keyFor(id);
+      if (seen.has(key) || (this.connected && !this.connected.has(id))) continue;
+      seen.add(key);
+      out.push({ key, label, channels: this.devices.get(key)?.channels || 2 });
+    }
+    const own = this.keyOf(track);
+    if (track && !seen.has(own)) {
+      const name = this.names.get(own) || track.inputDeviceName || "Saved device";
+      out.push({ key: own, label: `${name} (not connected)`, channels: 2, missing: true });
+    }
+    return out;
+  }
+
+  // ── the main device, for code written before there could be several ──
+  get open() {
+    return this.main.open;
+  }
+  get channels() {
+    return this.main.channels;
+  }
+  get deviceLabel() {
+    return this.main.label;
+  }
+  get deviceId() {
+    return this.main.deviceId;
+  }
+  get fellBack() {
+    return this.main.fellBack;
+  }
+
+  async acquire(user, key = "") {
+    await this.device(key).acquire(user);
+    this.refreshDevices();
+    return this;
+  }
+
+  release(user, key = "") {
+    this.devices.get(key)?.release(user);
+  }
+
+  levels(key = "") {
+    const d = this.devices.get(key);
+    return d?.open ? d.levels() : [];
+  }
+
+  /** Did any of these channels (0-based) on device `key` hit full scale? */
+  clipped(key, chans) {
+    const d = this.devices.get(key);
+    return !!d && chans.some((c) => d.clip[c]);
+  }
+
+  resetClips(key = null) {
+    for (const [k, d] of this.devices) if (key == null || k === key) d.clip.fill(false);
+  }
+
+  /** Switch the main device: keep whoever was holding it, reopen on the new one. */
+  async setInputDevice(id) {
+    if (this.capture) throw new Error("finish recording before changing the input");
+    savePrefs({ inputId: id });
+    // Which device a track's key resolves to may have changed: start over and
+    // let arming and the dialog take back what they need.
+    const users = [...this.main.users];
+    for (const d of this.devices.values()) {
+      d.users.clear();
+      if (d.open) d.close();
+    }
+    this.devices.clear();
+    this.monTargets = null;
+    for (const u of users.filter((u) => u !== "armed")) await this.device("").acquire(u);
+    this.syncMonitoring();
+  }
+
+  /* ── latency ─────────────────────────────────────────────────────────── */
+
+  /** What the browser reports for the round trip through device `key`, in seconds. */
+  estimatedLatency(key = "") {
+    const ctx = engine.ctx;
+    const out = (ctx?.baseLatency || 0) + (ctx?.outputLatency || 0);
+    const inp = this.devices.get(key)?.inputLatency || 0;
+    return { output: out, input: inp, total: out + inp };
+  }
+
+  /** Saved shift for device `key` in ms, or null to use the estimate. */
+  savedLatency(key = "") {
+    const p = loadPrefs();
+    const v = key ? p.deviceLatency?.[key] : p.latencyMs;
+    return v != null && isFinite(v) ? v : null;
+  }
+
+  setSavedLatency(key, ms) {
+    if (!key) return savePrefs({ latencyMs: ms });
+    const map = { ...(loadPrefs().deviceLatency ?? {}) };
+    if (ms == null) delete map[key];
+    else map[key] = ms;
+    return savePrefs({ deviceLatency: map });
+  }
+
+  /** The offset applied to takes from device `key`. */
+  compensation(key = "") {
+    const v = this.savedLatency(key);
+    if (v != null) return { seconds: v / 1000, source: "calibrated" };
+    return { seconds: this.estimatedLatency(key).total, source: "estimated" };
+  }
+
+  /* ── arming & monitoring ─────────────────────────────────────────────── */
+
+  /**
+   * Keep each device open while a track armed on it, and route every armed,
+   * monitoring track's input into that track so you hear yourself through its
+   * inserts, fader and pan.
+   *
+   * Holding a device open while armed is about timing as much as speed: a
+   * browser's capture path can settle at a slightly different delay each time
+   * it is opened, so the measured latency only holds for the open it was
+   * measured on. Arm, calibrate, record — all on one open — and takes land
+   * where they were played. It also means record starts without a permission
+   * round trip.
+   */
+  syncMonitoring() {
+    if (!engine.ctx) return;
+    const armed = state.project.tracks.filter((t) => t.armed);
+    const need = new Set(armed.map((t) => this.keyOf(t)));
+    for (const key of need) {
+      const d = this.device(key);
+      if (!d.users.has("armed")) {
+        d.acquire("armed").catch((err) => bus.emit("audioinput", { error: err, key }));
+      }
+    }
+    for (const [key, d] of this.devices) if (!need.has(key) && d.users.has("armed")) d.release("armed");
+
+    const want = armed.filter((t) => t.monitor && engine.tracks.has(t.id) && this.deviceOf(t));
+    // Mix events fire on every fader release; only rewire when routing changed.
+    // (Compared by node bundle, so a track rebuilt by undo gets rewired.)
+    const targets = want.map((t) => [engine.tracks.get(t.id), String(t.input), this.deviceOf(t).split]);
+    const same =
+      this.monTargets?.length === targets.length &&
+      targets.every((x, i) => x.every((v, j) => v === this.monTargets[i][j]));
+    if (same && this.monitors.length === want.length) return;
+    this.unrouteMonitors();
+    this.monTargets = targets;
+    for (const track of want) {
+      const dev = this.deviceOf(track);
+      const node = dev.tap(track.input);
+      node.connect(engine.trackInput(track.id));
+      this.monitors.push({ node, key: dev.key });
+    }
+  }
+
+  unrouteMonitors() {
+    for (const { node } of this.monitors) {
+      try {
+        node.disconnect();
+      } catch {
+        /* torn down */
+      }
+    }
+    this.monitors = [];
+    this.monTargets = null;
+  }
+
+  /** A device closed: its monitors go with it; the rest stay put. */
+  dropMonitors(key) {
+    const keep = [];
+    for (const m of this.monitors) {
+      if (m.key !== key) keep.push(m);
+      else
+        try {
+          m.node.disconnect();
+        } catch {
+          /* torn down */
+        }
+    }
+    if (keep.length !== this.monitors.length) this.monTargets = null;
+    this.monitors = keep;
+  }
+
+  /* ── recording ───────────────────────────────────────────────────────── */
+
+  /**
+   * Start capturing for the given armed tracks — one capture node per device
+   * they use. The transport must start (or restart) playback *after* this so
+   * its segments are logged for the take.
+   */
+  async startCapture(tracks) {
+    const byKey = new Map();
+    for (const t of tracks) {
+      const k = this.keyOf(t);
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k).push(t);
+    }
+    const parts = [];
+    try {
+      for (const [key, list] of byKey) {
+        const dev = this.device(key);
+        await dev.acquire("record");
+        const part = { key, dev, tap: null };
+        parts.push(part);
+        part.tap = await dev.recorder();
+        part.roundTrip = this.compensation(key).seconds;
+        // Snapshot which inputs feed which tracks: changing a track's input
+        // mid-take should not rewrite the take.
+        part.targets = list.map((t) => ({ trackId: t.id, chans: parseInput(t.input, dev.channels) }));
+      }
+    } catch (err) {
+      for (const p of parts) {
+        await p.tap?.stop().catch(() => {});
+        p.dev.release("record");
+      }
+      throw err;
+    }
+    // A clip light from before this take shouldn't be read as this take's.
+    for (const p of parts) p.dev.clip.fill(false);
+    this.capture = { parts, sampleRate: engine.ctx.sampleRate };
+    engine.recLog = [];
+    engine.recording = true;
+    return this.capture;
+  }
+
+  /** Device names in the take being recorded, for messages. */
+  captureLabel() {
+    return (this.capture?.parts ?? []).map((p) => p.dev.label).join(" + ");
+  }
+
+  /**
+   * Stop capturing and assemble one take per target track. The synchronous
+   * part (before the first await) ends the take *now*, so callers can stop the
+   * transport straight after without clipping or extending it.
+   */
+  async stopCapture() {
+    const cap = this.capture;
+    const now = engine.ctx.currentTime;
+    // Close the take on *copies*: the last logged segment is still the
+    // transport's live one when playback carries on past the take (stopping
+    // with the record button). Clamping it in place left it ending "now" on the
+    // clock but at Infinity on the timeline, and the playhead jumped there.
+    const log = (engine.recLog ?? []).map((seg) => ({ ...seg, ctxEnd: Math.min(seg.ctxEnd, now) }));
+    this.capture = null;
+    engine.recording = false;
+    engine.recLog = null;
+    if (!cap) return [];
+    const sets = await Promise.all(cap.parts.map((p) => p.tap.stop().catch(() => [])));
+    const takes = [];
+    cap.parts.forEach((p, i) => {
+      p.dev.release("record");
+      const made = assembleTakes(sets[i], log, { roundTrip: p.roundTrip, targets: p.targets, sampleRate: cap.sampleRate });
+      for (const t of made) takes.push({ ...t, device: p.dev.label });
+    });
+    return takes;
+  }
 
   /* ── calibration ─────────────────────────────────────────────────────── */
 
   /**
-   * Measure the real round trip: play a few clicks and find them in the input.
-   * Needs the output to reach the input — a cable from an output to an input,
-   * or speakers near a mic. Resolves to { ms, spread, hits, channel } or throws.
+   * Measure the real round trip through device `key`: play a few clicks and
+   * find them in its input. Needs the output to reach the input — a cable from
+   * an output to an input, or speakers near a mic. Resolves to
+   * { ms, spread, hits, channel } or throws.
    */
-  async calibrate() {
+  async calibrate(key = "") {
     if (this.capture) throw new Error("finish recording first");
-    await this.acquire("calibrate");
+    const dev = this.device(key);
+    await dev.acquire("calibrate");
     let rec;
     try {
       const ctx = engine.ctx;
-      rec = await this.recorder();
+      rec = await dev.recorder();
       const pre = 0.5;
       const t0 = ctx.currentTime + pre;
       const burst = clickBuffer(ctx);
@@ -453,12 +689,30 @@ class Input {
       return findClicks(chunks, times, ctx.sampleRate, CLICK_GAP_MIN);
     } finally {
       if (rec) await rec.stop().catch(() => {});
-      this.release("calibrate");
+      dev.release("calibrate");
     }
   }
 }
 
+// Windows lists these as extra entries that alias real devices.
+const ALIAS_IDS = new Set(["default", "communications", ""]);
+
 export const input = new Input();
+
+/** A track's input in words: "In 1" for the main device, "USB Mic · In 1" for another. */
+export function trackInputLabel(track) {
+  const key = input.keyOf(track);
+  const spec = inputLabel(track?.input);
+  if (!key) return spec;
+  return `${input.names.get(key) || track.inputDeviceName || "Saved device"} · ${spec}`;
+}
+
+/** Point a track at device `key` ("" = the main input) and input `spec`. */
+export function setTrackInput(track, key, spec) {
+  track.inputDevice = key;
+  track.inputDeviceName = key ? input.nameOf(key) : "";
+  track.input = spec;
+}
 
 /* ── device lists & output ────────────────────────────────────────────── */
 

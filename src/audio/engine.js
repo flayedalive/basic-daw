@@ -33,6 +33,7 @@ class Engine {
     this.sources = new Set();
     this.timer = null;
     this.levels = new Map(); // trackId | "master" -> {peak, peakR, hold}
+    this.clips = new Set(); // ids ("master" too) whose level reached 0 dBFS since last reset
     this.metronome = false;
     this.fxSignature = "";
     this.onTick = null; // main.js hooks the UI refresh here
@@ -201,11 +202,17 @@ class Engine {
   get position() {
     if (!this.playing || !this.ctx) return state.playhead;
     const now = this.ctx.currentTime;
-    for (const s of this.segments) {
+    const segs = this.segments;
+    if (!segs.length) return state.playhead;
+    // Inside the short pad before the first segment starts sounding.
+    if (now < segs[0].ctxStart) return segs[0].posStart;
+    for (const s of segs) {
       if (now >= s.ctxStart && now < s.ctxEnd) return s.posStart + (now - s.ctxStart);
     }
-    const last = this.segments.at(-1);
-    return last ? last.posEnd : state.playhead;
+    // Past every segment's end (a loop wrap scheduled but not yet heard): hold
+    // the end — but never report an open-ended segment's Infinity as a place.
+    const last = segs.at(-1);
+    return Number.isFinite(last.posEnd) ? last.posEnd : last.posStart + (now - last.ctxStart);
   }
 
   play(from = state.playhead) {
@@ -421,16 +428,30 @@ class Engine {
     if (!this.ctx) return this.levels;
     for (const [id, b] of this.tracks) {
       b.analyser.getFloatTimeDomainData(b.buf);
-      this.levels.set(id, { peak: peakOf(b.buf), peakR: 0 });
+      const peak = peakOf(b.buf);
+      // Inside the mix, floats above 1.0 aren't clipped yet — but a track over
+      // 0 dBFS will clip as a fixed-point stem, and the master will clip on the
+      // way out to the interface or into a 16/24-bit bounce.
+      if (peak >= 1) this.clips.add(id);
+      this.levels.set(id, { peak, peakR: 0 });
     }
     const m = this.master;
     m.analyserL.getFloatTimeDomainData(m.bufL);
     m.analyserR.getFloatTimeDomainData(m.bufR);
-    this.levels.set("master", { peak: peakOf(m.bufL), peakR: peakOf(m.bufR) });
+    const pl = peakOf(m.bufL);
+    const pr = peakOf(m.bufR);
+    if (pl >= 1 || pr >= 1) this.clips.add("master");
+    this.levels.set("master", { peak: pl, peakR: pr });
     // Effects that model their own envelope (the gate) run off the UI clock.
     for (const b of this.tracks.values()) for (const fx of b.fxLive) fx.tick?.(1 / 60);
     for (const fx of m.fxLive) fx.tick?.(1 / 60);
     return this.levels;
+  }
+
+  /** Clear the clip latch for one id ("master" included), or all of them. */
+  resetClips(id = null) {
+    if (id == null) this.clips.clear();
+    else this.clips.delete(id);
   }
 
   /* ── preview (pool auditioning) ────────────────────────────────────── */

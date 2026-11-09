@@ -17,9 +17,9 @@ import {
   projectDuration,
 } from "../state.js";
 import { engine } from "../audio/engine.js";
-import { DEFAULT_INPUT, input, inputChoices, inputLabel } from "../audio/input.js";
+import { DEFAULT_INPUT, input, inputChoices, inputLabel, setTrackInput } from "../audio/input.js";
 import { defaultParams, getPlugin, labelOf, newEffect, pluginsByCategory, resolveId } from "../plugins/registry.js";
-import { sliderRow } from "./controls.js";
+import { sliderRow, parseDb, parsePan } from "./controls.js";
 import { drawPeaks } from "../audio/peaks.js";
 import { tunerDisplay } from "./tuner.js";
 
@@ -179,7 +179,7 @@ function renderClip() {
         min: -48,
         max: 12,
         def: 0,
-        format: (v) => `${fmtDb(v)} dB`,
+        format: (v) => `${fmtDb(v)} dB`, parse: parseDb,
         onInput: (v) => {
           for (const c of state.project.clips) if (state.selection.has(c.id)) c.gainDb = v;
           changed("clips", false);
@@ -370,7 +370,7 @@ function renderTrack(track) {
         min: -60,
         max: 6,
         def: 0,
-        format: (v) => `${fmtDb(v)} dB`,
+        format: (v) => `${fmtDb(v)} dB`, parse: parseDb,
         onInput: (v) => {
           track.volumeDb = v;
           engine.updateMix();
@@ -383,7 +383,7 @@ function renderTrack(track) {
         min: -1,
         max: 1,
         def: 0,
-        format: (v) => (Math.abs(v) < 0.02 ? "centre" : `${v < 0 ? "L" : "R"} ${Math.round(Math.abs(v) * 100)}`),
+        format: (v) => (Math.abs(v) < 0.02 ? "centre" : `${v < 0 ? "L" : "R"} ${Math.round(Math.abs(v) * 100)}`), parse: parsePan,
         onInput: (v) => {
           track.pan = v;
           engine.updateMix();
@@ -415,7 +415,7 @@ function renderMaster() {
         min: -60,
         max: 6,
         def: 0,
-        format: (v) => `${fmtDb(v)} dB`,
+        format: (v) => `${fmtDb(v)} dB`, parse: parseDb,
         onInput: (v) => {
           m.volumeDb = v;
           engine.updateMix();
@@ -430,18 +430,31 @@ function renderMaster() {
 /** Which interface input feeds the track, and whether you hear it while armed. */
 function recordingSection(track) {
   const current = String(track.input ?? DEFAULT_INPUT);
-  const choices = inputChoices(input.channels || 2);
+  const curKey = input.keyOf(track);
+  const sources = input.sources(track);
+  // Option values carry both halves: "<device key>|<inputs>".
   const sel = el("select.select.grow", {
     onchange: (e) => {
+      const [key, spec] = splitChoice(e.target.value);
       pushUndo("track input");
-      track.input = e.target.value;
+      setTrackInput(track, key, spec);
       changed("mix");
     },
   });
-  for (const c of choices) sel.append(el("option", { value: c.value, selected: c.value === current }, c.label));
+  let found = false;
+  for (const src of sources) {
+    const choices = inputChoices(src.channels);
+    const opts = choices.map((c) => {
+      const on = src.key === curKey && c.value === current;
+      found ||= on;
+      return el("option", { value: `${src.key}|${c.value}`, selected: on }, c.label);
+    });
+    if (sources.length > 1) sel.append(el("optgroup", { label: src.label }, opts));
+    else sel.append(...opts);
+  }
   // A session from a machine with more inputs: keep its choice visible.
-  if (!choices.some((c) => c.value === current)) {
-    sel.append(el("option", { value: current, selected: true }, `${inputLabel(current)} — not on this device`));
+  if (!found) {
+    sel.append(el("option", { value: `${curKey}|${current}`, selected: true }, `${inputLabel(current)} — not on this device`));
   }
 
   const mon = el("input", {
@@ -465,6 +478,12 @@ function recordingSection(track) {
       btn("Audio setup…", () => import("./audio-setup.js").then((m) => m.audioSetup())),
     ),
   );
+}
+
+/** "<key>|<spec>" → [key, spec]. Device ids never contain "|"; specs never do either. */
+function splitChoice(v) {
+  const i = v.lastIndexOf("|");
+  return [v.slice(0, i), v.slice(i + 1)];
 }
 
 function toggleTrack(track, key) {

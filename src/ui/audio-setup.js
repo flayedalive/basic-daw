@@ -1,8 +1,9 @@
-// Audio setup dialog: choose the input and output devices, watch each input's
-// level, and set the round-trip latency that takes are shifted back by.
+// Audio setup dialog: choose the main input and the output, watch every input
+// in use (with clip lights), and set the round-trip latency that takes are
+// shifted back by — per device, since each settles at its own delay.
 
 import { clamp, coalesce, dialog, el, toast } from "../util.js";
-import { bus } from "../state.js";
+import { bus, state } from "../state.js";
 import { engine } from "../audio/engine.js";
 import {
   canChooseOutput,
@@ -10,7 +11,6 @@ import {
   listDevices,
   loadPrefs,
   requestPermission,
-  savePrefs,
   setOutputDevice,
 } from "../audio/input.js";
 
@@ -19,42 +19,52 @@ const ms = (s) => `${(s * 1000).toFixed(1)} ms`;
 export function audioSetup() {
   engine.ensure();
   dialog("Audio setup", (body) => {
-    let openError = null;
-    let calibrating = false;
-    let calStatus = null;
-    let meters = []; // { fill, val, shown, hold, holdUntil }
+    const errors = new Map(); // device key -> Error from opening it
+    const held = new Set(); // device keys this dialog is holding open
+    let calibrating = null; // device key being calibrated
+    const calStatus = new Map(); // device key -> status element
+    let meters = []; // { key, c, fill, val, led, shown, hold, holdUntil }
 
-    const tryOpen = () =>
-      input
-        .acquire("meter")
-        .then(() => (openError = null))
-        .catch((err) => (openError = err))
+    /** Device keys tracks in this project record from, other than the main input. */
+    const otherKeys = () => [...new Set(state.project.tracks.map((t) => input.keyOf(t)).filter(Boolean))];
+
+    const hold = (key) => {
+      held.add(key);
+      return input
+        .acquire("meter", key)
+        .then(() => errors.delete(key))
+        .catch((err) => errors.set(key, err))
         .finally(render);
+    };
+    const holdAll = () => Promise.all(["", ...otherKeys()].filter((k) => !held.has(k)).map(hold));
 
     const render = coalesce(async () => {
       if (!body.isConnected) return;
       const devs = await listDevices().catch(() => ({ inputs: [], outputs: [], labelled: false }));
       const prefs = loadPrefs();
-      body.replaceChildren(inputSection(devs, prefs), outputSection(devs, prefs), latencySection(prefs), aboutNote());
+      meters = [];
+      body.replaceChildren(
+        mainSection(devs, prefs),
+        otherSection(devs),
+        outputSection(devs, prefs),
+        latencySection(),
+        aboutNote(),
+      );
     });
 
-    /* ── input ───────────────────────────────────────────────────────── */
+    /* ── inputs ──────────────────────────────────────────────────────── */
 
-    function inputSection(devs, prefs) {
+    function mainSection(devs, prefs) {
       const items = [];
       if (!devs.labelled) {
         items.push(
-          el(
-            "div.insp-empty",
-            null,
-            "Your browser hides device names until this page may use the microphone.",
-          ),
+          el("div.insp-empty", null, "Your browser hides device names until this page may use the microphone."),
           el(
             "div.btnrow",
             null,
             el("button.btn.primary", {
               textContent: "Allow microphone access",
-              onclick: () => requestPermission().then(tryOpen, (e) => toast(`Permission refused: ${e.message}`, "err")),
+              onclick: () => requestPermission().then(() => hold(""), (e) => toast(`Permission refused: ${e.message}`, "err")),
             }),
           ),
         );
@@ -63,48 +73,85 @@ export function audioSetup() {
       const sel = deviceSelect(devs.inputs, prefs.inputId || "", "System default input", async (id) => {
         try {
           await input.setInputDevice(id);
-          openError = null;
-          if (!input.open) await tryOpen();
+          held.clear();
+          errors.clear();
+          await holdAll();
         } catch (err) {
-          openError = err;
+          errors.set("", err);
         }
         render();
       });
       sel.disabled = engine.recording;
       items.push(el("div.prow", null, el("label", null, "Device"), sel));
+      items.push(...deviceBody("", input.main.fellBack ? " · saved device missing, using the default" : ""));
+      items.push(
+        el(
+          "div.insp-empty",
+          null,
+          "Echo cancellation, noise suppression and auto gain are off, so instruments record clean. Pick which input each track records from by right-clicking its header, or in its inspector. CLIP lights when an input reaches full scale — turn the gain down on the interface itself; a track's fader can't undo it.",
+        ),
+      );
+      return sec("Main input", items);
+    }
 
-      if (openError) {
-        items.push(
-          el("div.plug-warn", null, el("b", null, "Input unavailable"), el("div.a-meta", null, openError.message || openError.name)),
-          el("div.btnrow", null, el("button.btn", { textContent: "Try again", onclick: tryOpen })),
-        );
-      } else if (!input.open) {
-        items.push(el("div.insp-empty", null, "Opening the input…"));
-      } else {
-        const n = input.channels;
-        items.push(
+    function otherSection(devs) {
+      const keys = otherKeys();
+      const others = devs.inputs.filter((d) => !["default", "communications", ""].includes(d.deviceId) && input.keyFor(d.deviceId) !== "");
+      if (!keys.length) {
+        if (!others.length) return null;
+        return sec("Other inputs", [
           el(
             "div.insp-empty",
             null,
-            `${input.deviceLabel} · ${n} input${n > 1 ? "s" : ""}${input.fellBack ? " · saved device missing, using the default" : ""}`,
+            `Also connected: ${others.map((d) => d.label || "unnamed device").join(", ")}. To record from one alongside the main input, choose it from a track's input menu — each track can use a different device.`,
           ),
-        );
-        meters = [];
-        for (let c = 0; c < n; c++) {
-          const fill = el("i");
-          const val = el("span.val", null, "-∞");
-          meters.push({ fill, val, shown: 0, hold: 0, holdUntil: 0 });
-          items.push(el("div.prow", null, el("label", null, `In ${c + 1}`), el("div.as-meter.grow", null, fill), val));
-        }
-        items.push(
-          el(
-            "div.insp-empty",
-            null,
-            "Echo cancellation, noise suppression and auto gain are off, so instruments record clean. Pick which input each track records from by right-clicking its header, or in its inspector.",
-          ),
-        );
+        ]);
       }
-      return sec("Input", items);
+      const items = [];
+      for (const key of keys) {
+        items.push(el("div.as-dev", null, input.nameOf(key)));
+        items.push(...deviceBody(key, ""));
+      }
+      items.push(
+        el(
+          "div.insp-empty",
+          null,
+          "Each device runs on its own clock. Takes are lined up using each one's own latency (below); on very long takes a separate device can drift by a few milliseconds.",
+        ),
+      );
+      return sec("Other inputs", items);
+    }
+
+    /** Status line and per-channel meters for one device. */
+    function deviceBody(key, note) {
+      const err = errors.get(key);
+      const dev = input.devices.get(key);
+      if (err) {
+        return [
+          el("div.plug-warn", null, el("b", null, "Input unavailable"), el("div.a-meta", null, err.message || err.name)),
+          el("div.btnrow", null, el("button.btn", { textContent: "Try again", onclick: () => hold(key) })),
+        ];
+      }
+      if (!dev?.open) return [el("div.insp-empty", null, "Opening the input…")];
+      const n = dev.channels;
+      const out = [el("div.insp-empty", null, `${dev.label} · ${n} input${n > 1 ? "s" : ""}${note}`)];
+      for (let c = 0; c < n; c++) {
+        const fill = el("i");
+        const val = el("span.val", null, "-∞");
+        const led = el(
+          "span.as-clip",
+          {
+            title: "Reached full scale — click to clear",
+            onclick: () => {
+              dev.clip[c] = false;
+            },
+          },
+          "CLIP",
+        );
+        meters.push({ key, c, fill, val, led, shown: 0, hold: 0, holdUntil: 0 });
+        out.push(el("div.prow", null, el("label", null, `In ${c + 1}`), el("div.as-meter.grow", null, fill), val, led));
+      }
+      return out;
     }
 
     /* ── output ──────────────────────────────────────────────────────── */
@@ -129,42 +176,58 @@ export function audioSetup() {
 
     /* ── latency ─────────────────────────────────────────────────────── */
 
-    function latencySection(prefs) {
-      const est = input.estimatedLatency();
-      const comp = input.compensation();
+    function latencySection() {
+      const keys = ["", ...otherKeys()];
+      const items = [];
+      for (const key of keys) {
+        if (keys.length > 1) items.push(el("div.as-dev", null, input.nameOf(key)));
+        items.push(...latencyRows(key));
+      }
+      items.push(
+        el(
+          "div.insp-empty",
+          null,
+          "Takes are moved earlier by this much so they line up with what you heard. To measure it, run a cable from an output to an input (or hold the mic near the speakers), turn monitoring off, and press Calibrate: six clicks are played and timed on their way back in.",
+        ),
+      );
+      return sec("Latency", items);
+    }
+
+    function latencyRows(key) {
+      const est = input.estimatedLatency(key);
+      const comp = input.compensation(key);
+      const saved = input.savedLatency(key);
       const offset = el("input.num", {
         type: "number",
         step: "0.1",
         min: "0",
         max: "1000",
         placeholder: (est.total * 1000).toFixed(1),
-        value: prefs.latencyMs != null ? String(prefs.latencyMs) : "",
+        value: saved != null ? String(saved) : "",
         title: "Leave empty to use the browser's estimate",
         onchange: (e) => {
           const v = e.target.value.trim();
-          savePrefs({ latencyMs: v === "" ? null : clamp(Number(v) || 0, 0, 1000) });
+          input.setSavedLatency(key, v === "" ? null : clamp(Number(v) || 0, 0, 1000));
           render();
         },
       });
-
       const calBtn = el("button.btn.primary", {
-        textContent: calibrating ? "Listening…" : "Calibrate",
-        disabled: calibrating || engine.recording,
-        onclick: calibrate,
+        textContent: calibrating === key ? "Listening…" : "Calibrate",
+        disabled: calibrating != null || engine.recording,
+        onclick: () => calibrate(key),
       });
       const resetBtn =
-        prefs.latencyMs != null
+        saved != null
           ? el("button.btn", {
               textContent: "Use estimate",
               onclick: () => {
-                savePrefs({ latencyMs: null });
-                calStatus = null;
+                input.setSavedLatency(key, null);
+                calStatus.delete(key);
                 render();
               },
             })
           : null;
-
-      return sec("Latency", [
+      return [
         el(
           "div.prow",
           null,
@@ -179,34 +242,32 @@ export function audioSetup() {
           el("span.a-meta", null, `ms · ${comp.source === "calibrated" ? "measured / set" : "using the estimate"}`),
         ),
         el("div.btnrow", null, calBtn, resetBtn),
-        calStatus,
-        el(
-          "div.insp-empty",
-          null,
-          "Takes are moved earlier by this much so they line up with what you heard. To measure it, run a cable from an output to an input (or hold a mic near the speakers), turn monitoring off, and press Calibrate: six clicks are played and timed on their way back in.",
-        ),
-      ]);
+        calStatus.get(key) ?? null,
+      ];
     }
 
-    async function calibrate() {
-      calibrating = true;
-      calStatus = el("div.insp-empty", null, "Playing test clicks — keep the room quiet…");
+    async function calibrate(key) {
+      calibrating = key;
+      calStatus.set(key, el("div.insp-empty", null, "Playing test clicks — keep the room quiet…"));
       render();
       try {
-        const r = await input.calibrate();
-        savePrefs({ latencyMs: r.ms });
+        const r = await input.calibrate(key);
+        input.setSavedLatency(key, r.ms);
         const shaky = r.spread > 3;
-        calStatus = el(
-          shaky ? "div.plug-warn" : "div.insp-empty",
-          null,
-          `Measured ${r.ms} ms — heard ${r.hits}/${r.of} clicks on In ${r.channel}, spread ${r.spread} ms.`,
-          shaky ? " The clicks were inconsistent; a cable loop measures more reliably than speakers and a mic." : "",
+        calStatus.set(
+          key,
+          el(
+            shaky ? "div.plug-warn" : "div.insp-empty",
+            null,
+            `Measured ${r.ms} ms — heard ${r.hits}/${r.of} clicks on In ${r.channel}, spread ${r.spread} ms.`,
+            shaky ? " The clicks were inconsistent; a cable loop measures more reliably than speakers and a mic." : "",
+          ),
         );
-        toast(`Latency set to ${r.ms} ms`, "ok");
+        toast(`Latency for ${input.nameOf(key)} set to ${r.ms} ms`, "ok");
       } catch (err) {
-        calStatus = el("div.plug-warn", null, el("b", null, "Calibration failed"), el("div.a-meta", null, err.message));
+        calStatus.set(key, el("div.plug-warn", null, el("b", null, "Calibration failed"), el("div.a-meta", null, err.message)));
       } finally {
-        calibrating = false;
+        calibrating = null;
         render();
       }
     }
@@ -223,26 +284,31 @@ export function audioSetup() {
 
     const unsubs = [
       bus.on("audioinput", (info) => {
-        if (info?.lost) openError = new Error("the input device was disconnected");
+        if (info?.lost) errors.set(info.key ?? "", new Error("the input device was disconnected"));
         render();
       }),
+      // A track switched to a new device while the dialog is open: start metering it.
+      bus.on("mix", () => holdAll()),
     ];
     const onDevChange = () => render();
     navigator.mediaDevices?.addEventListener?.("devicechange", onDevChange);
 
     const frame = () => {
       if (!body.isConnected) {
-        // Dialog closed (button, Esc or click outside): let the input go.
+        // Dialog closed (button, Esc or click outside): let the inputs go.
         unsubs.forEach((u) => u());
         navigator.mediaDevices?.removeEventListener?.("devicechange", onDevChange);
-        input.release("meter");
+        for (const key of held) input.release("meter", key);
         return;
       }
-      if (input.open && meters.length) {
-        const lv = input.levels();
+      if (meters.length) {
         const now = performance.now();
-        meters.forEach((m, i) => {
-          const p = lv[i] ?? 0;
+        const byKey = new Map();
+        for (const m of meters) {
+          const dev = input.devices.get(m.key);
+          if (!dev?.open) continue;
+          if (!byKey.has(m.key)) byKey.set(m.key, dev.levels());
+          const p = byKey.get(m.key)[m.c] ?? 0;
           const db = p > 0 ? 20 * Math.log10(p) : -Infinity;
           const t = clamp(1 + (isFinite(db) ? db : -60) / 60, 0, 1);
           m.shown = t > m.shown ? t : m.shown * 0.9;
@@ -253,13 +319,15 @@ export function audioSetup() {
             m.val.textContent = isFinite(db) ? db.toFixed(1) : "-∞";
             m.val.classList.toggle("clip", db > -0.5);
           }
-        });
+          const clip = !!dev.clip[m.c];
+          if (m.led.classList.contains("on") !== clip) m.led.classList.toggle("on", clip);
+        }
       }
       requestAnimationFrame(frame);
     };
 
     render();
-    tryOpen();
+    holdAll();
     requestAnimationFrame(frame);
   });
 }
