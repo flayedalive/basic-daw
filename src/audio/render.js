@@ -7,6 +7,7 @@ import { assets, state, trackAudible } from "../state.js";
 import { buildChain } from "./effects.js";
 import { scheduleClipEnvelope } from "./engine.js";
 import { encodeWav } from "./wav.js";
+import { measureBuffer, gainToTarget } from "./loudness.js";
 
 /**
  * Seconds of silence rendered ahead of the range and then thrown away.
@@ -116,6 +117,35 @@ function reverseCopy(ctx, buffer) {
     for (let i = 0, n = from.length; i < n; i++) to[i] = from[n - 1 - i];
   }
   return out;
+}
+
+/** Multiply every sample of `buffer` by `gainDb`, in place. */
+export function applyGainDb(buffer, gainDb) {
+  if (!gainDb) return;
+  const g = dbToGain(gainDb);
+  for (let c = 0; c < buffer.numberOfChannels; c++) {
+    const d = buffer.getChannelData(c);
+    for (let i = 0; i < d.length; i++) d[i] *= g;
+  }
+}
+
+/**
+ * The last step of a bounce: normalize as asked, then measure what is about to
+ * be written. mode: "off" | "peak" (to -0.3 dBFS) | "lufs" (to `target` LUFS,
+ * held back so the true peak stays under `ceiling` dBTP).
+ * Returns { report, gainDb, limited, shortfall }; `report` is of the result.
+ */
+export function finishBounce(buffer, { mode = "off", target = -14, ceiling = -1 } = {}) {
+  let gainDb = 0;
+  let limited = false;
+  let shortfall = 0;
+  if (mode === "peak") {
+    gainDb = 20 * Math.log10(normalizeBuffer(buffer, -0.3));
+  } else if (mode === "lufs") {
+    ({ gainDb, limited, shortfall } = gainToTarget(measureBuffer(buffer), target, ceiling));
+    applyGainDb(buffer, gainDb);
+  }
+  return { report: measureBuffer(buffer), gainDb, limited, shortfall };
 }
 
 /** Peak-normalize in place to `targetDb`, returning the gain that was applied. */

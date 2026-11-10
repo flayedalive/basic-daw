@@ -98,6 +98,9 @@ Everything runs client-side, so nothing you import ever leaves your machine.
 **Export**
 - Bounce the master, the loop region, or the selection to 16/24-bit or 32-bit
   float WAV at 44.1 / 48 / 96 kHz, with an optional tail and peak normalize
+- Every bounce ends with a loudness report — integrated LUFS, short-term max,
+  loudness range, true peak, PLR (ITU-R BS.1770 / EBU R 128) — and can be
+  normalized to a LUFS target instead of to peak, held under -1 dBTP
 - Export stems: one WAV per track, post-insert, pre-master
 
 **Plugins**
@@ -133,6 +136,9 @@ src/
     input.js          input devices (several at once), monitoring, take capture, latency calibration
     effects.js        insert chain wiring (buildChain / disposeChain)
     render.js         OfflineAudioContext bounce, normalize, analysis
+    loudness.js       BS.1770 loudness, loudness range, true peak
+    fft.js            radix-2 FFT
+    resample.js       windowed-sinc sample-rate conversion
     peaks.js          min/max peak pyramid + waveform drawing
     wav.js            WAV encode, and a decoder for what browsers reject
   plugins/

@@ -2,9 +2,9 @@
 // bounce (master mixdown, stems, selection).
 
 import { assets, bus, changed, clearHistory, newProject, PROJECT_VERSION, state } from "./state.js";
-import { dialog, download, el, fmtBytes, fmtDur, toast, uid, $ } from "./util.js";
+import { clamp, dialog, download, el, fmtBytes, fmtDur, toast, uid, $ } from "./util.js";
 import { engine } from "./audio/engine.js";
-import { renderRange, normalizeBuffer, analyzeBuffer } from "./audio/render.js";
+import { renderRange, finishBounce } from "./audio/render.js";
 import { encodeWav } from "./audio/wav.js";
 import { rehydrateAssets, serializeAssets } from "./assets.js";
 import { missingInProject } from "./plugins/registry.js";
@@ -235,14 +235,15 @@ function rangeFor(kind) {
   return [0, end];
 }
 
-function bounceDialog(kind) {
+export function bounceDialog(kind) {
   const [start, end] = rangeFor(kind);
   if (end <= start) return toast("Nothing to bounce", "err");
   const missing = missingInProject(state.project);
 
   let bits = 24;
   let rate = engine.sampleRate;
-  let normalize = false;
+  let normalize = "off"; // "off" | "peak" | "lufs"
+  let target = -14; // LUFS, when normalizing to loudness
   let tail = 2;
 
   dialog(
@@ -267,6 +268,25 @@ function bounceDialog(kind) {
         for (const o of options) s.append(el("option", { value: String(o.v), selected: o.v === value }, o.l));
         return el("div.prow", null, el("label", null, label), s);
       };
+
+      // Loudness normalizing is a plain gain change: it cannot make a mix
+      // louder than its peaks allow. Getting there with a limiter is the
+      // "master to a target" bounce.
+      const targetRow = el(
+        "div.prow",
+        { style: { display: "none" } },
+        el("label", null, "Target"),
+        el("input.field", {
+          type: "number",
+          min: -40,
+          max: -5,
+          step: 0.5,
+          value: target,
+          style: { width: "70px" },
+          onchange: (e) => (target = clamp(Number(e.target.value) || -14, -40, -5)),
+        }),
+        el("span.val", null, "LUFS · true peak ≤ -1 dBTP"),
+      );
 
       body.append(
         info,
@@ -301,13 +321,20 @@ function bounceDialog(kind) {
           tail,
           (v) => (tail = Number(v)),
         ),
-        el(
-          "div.prow",
-          null,
-          el("label", null, "Normalize"),
-          el("input", { type: "checkbox", onchange: (e) => (normalize = e.target.checked) }),
-          el("span.val", null, "peak -0.3 dB"),
+        sel(
+          "Normalize",
+          [
+            { v: "off", l: "off" },
+            { v: "peak", l: "peak to -0.3 dB" },
+            { v: "lufs", l: "to loudness…" },
+          ],
+          normalize,
+          (v) => {
+            normalize = v;
+            targetRow.style.display = v === "lufs" ? "" : "none";
+          },
         ),
+        targetRow,
         progress,
       );
 
@@ -316,9 +343,14 @@ function bounceDialog(kind) {
         progress.style.display = "block";
         const onProgress = (p) => (bar.style.width = `${Math.round(p * 100)}%`);
         try {
-          if (kind === "stems") await bounceStems({ start, end, bits, rate, normalize, tail, onProgress });
-          else await bounceMix({ start, end, bits, rate, normalize, tail, onProgress });
-          close();
+          if (kind === "stems") {
+            await bounceStems({ start, end, bits, rate, normalize, target, tail, onProgress });
+            close();
+          } else {
+            const result = await bounceMix({ start, end, bits, rate, normalize, target, tail, onProgress });
+            close();
+            loudnessDialog(result);
+          }
         } catch (err) {
           console.error(err);
           toast(`Bounce failed: ${err.message}`, "err", 6000);
@@ -339,23 +371,48 @@ function bounceDialog(kind) {
   );
 }
 
-async function bounceMix({ start, end, bits, rate, normalize, tail, onProgress }) {
+async function bounceMix({ start, end, bits, rate, normalize, target, tail, onProgress }) {
   const t0 = performance.now();
   const buffer = await renderRange(start, end, { sampleRate: rate, tailSec: tail, onProgress });
-  if (normalize) normalizeBuffer(buffer, -0.3);
-  const stats = analyzeBuffer(buffer);
+  const result = finishBounce(buffer, { mode: normalize, target });
   const blob = encodeWav(buffer, bits);
   download(blob, `${state.project.name.replace(/[^\w.-]+/g, "_")}.wav`);
-  toast(
-    `Bounced ${fmtDur(buffer.duration)} · ${fmtBytes(blob.size)} · peak ${stats.peakDb.toFixed(1)} dB · ${(
-      (performance.now() - t0) / 1000
-    ).toFixed(1)}s`,
-    "ok",
-    5000,
-  );
+  toast(`Bounced ${fmtDur(buffer.duration)} · ${fmtBytes(blob.size)} · ${((performance.now() - t0) / 1000).toFixed(1)}s`, "ok", 5000);
+  return { ...result, mode: normalize, target };
 }
 
-async function bounceStems({ start, end, bits, rate, normalize, tail, onProgress }) {
+const fmtLu = (v, unit) => (Number.isFinite(v) ? `${v.toFixed(1)} ${unit}` : `-∞ ${unit}`);
+
+/** What was just written, in the terms a streaming service or a mastering engineer would ask for. */
+export function loudnessDialog({ report, gainDb, limited, shortfall, mode, target, passes, notes = [] }) {
+  dialog("Bounce report", (body) => {
+    const line = (label, value, hint) => el("div.prow", { title: hint ?? "" }, el("label", null, label), el("span.val", null, value));
+    body.append(
+      line("Integrated", fmtLu(report.integrated, "LUFS"), "Whole-programme loudness (ITU-R BS.1770, gated)"),
+      line("Short-term max", fmtLu(report.shortTermMax, "LUFS"), "Loudest 3 seconds"),
+      line("Loudness range", `${report.range.toFixed(1)} LU`, "Spread between the quiet and loud passages (EBU Tech 3342)"),
+      line("True peak", fmtLu(report.truePeakDb, "dBTP"), "Highest level of the reconstructed waveform, between samples included"),
+      line("Sample peak", fmtLu(report.samplePeakDb, "dBFS")),
+      line("PLR", `${report.plr.toFixed(1)} dB`, "Peak to loudness ratio: true peak minus integrated loudness"),
+    );
+    if (mode && mode !== "off") body.append(line("Gain applied", `${gainDb >= 0 ? "+" : ""}${gainDb.toFixed(1)} dB`));
+    if (passes) body.append(line("Passes", String(passes)));
+    if (limited) {
+      body.append(
+        el(
+          "div.plug-warn",
+          null,
+          el("b", null, `${shortfall.toFixed(1)} LU short of ${target} LUFS`),
+          el("div.a-meta", null, "Reaching the target with gain alone would push the true peak over -1 dBTP, so the gain was held back. Use “Master to target” to get there with a limiter."),
+        ),
+      );
+    }
+    for (const n of notes) body.append(el("div.plug-warn", null, el("div.a-meta", null, n)));
+    if (report.truePeakDb > 0) body.append(el("div.plug-warn", null, el("b", null, "True peak is over 0 dBTP"), el("div.a-meta", null, "This file will clip when converted or played back. Lower the master or normalize.")));
+  });
+}
+
+async function bounceStems({ start, end, bits, rate, normalize, target, tail, onProgress }) {
   const tracks = state.project.tracks;
   for (let i = 0; i < tracks.length; i++) {
     const track = tracks[i];
@@ -366,7 +423,7 @@ async function bounceStems({ start, end, bits, rate, normalize, tail, onProgress
       applyMaster: false,
       onProgress: (p) => onProgress((i + p) / tracks.length),
     });
-    if (normalize) normalizeBuffer(buffer, -0.3);
+    finishBounce(buffer, { mode: normalize, target });
     const safe = track.name.replace(/[^\w.-]+/g, "_");
     download(encodeWav(buffer, bits), `${String(i + 1).padStart(2, "0")}_${safe}.wav`);
     // Browsers throttle rapid downloads; give each one a beat to land.
