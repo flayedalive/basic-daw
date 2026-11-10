@@ -211,7 +211,9 @@ export async function liveRender(buffer, fx = [], opts = {}) {
   const chain = buildChain(ctx, defs, input, output, false);
   const frames = Math.round((buffer.duration + (opts.tailSec ?? 0)) * ctx.sampleRate);
   // Long enough for the 20 ms parameter ramps a live build starts with to settle.
-  const start = Math.ceil((ctx.currentTime + 0.25) * ctx.sampleRate);
+  // …and on a render-block boundary, as an offline render's time zero is: the
+  // native compressor updates its gain in fixed sub-blocks of that grid.
+  const start = Math.ceil(((ctx.currentTime + (opts.settle ?? 0.25)) * ctx.sampleRate) / 128) * 128;
   const cap = new AudioWorkletNode(ctx, "test-capture", {
     numberOfInputs: 1,
     numberOfOutputs: 1,

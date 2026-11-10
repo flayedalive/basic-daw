@@ -9,6 +9,19 @@ import { scheduleClipEnvelope } from "./engine.js";
 import { encodeWav } from "./wav.js";
 
 /**
+ * Seconds of silence rendered ahead of the range and then thrown away.
+ *
+ * Live, an insert chain has existed for a while before you press play. A
+ * bounce builds it and plays into it in the same instant, and some nodes are
+ * not ready that fast: a DynamicsCompressorNode starts with its detector at
+ * zero and ducks the first few hundred milliseconds by up to 14 dB while it
+ * recovers at its release rate. Rendering this much silence first puts every
+ * insert in the state playback finds it in. Two seconds covers the longest
+ * release any built-in offers.
+ */
+export const PRE_ROLL = 2;
+
+/**
  * Render [start, end) of the project.
  * opts: { sampleRate, trackIds, applyMaster, respectMutes, tailSec, onProgress }
  */
@@ -18,7 +31,8 @@ export async function renderRange(start, end, opts = {}) {
   const tail = opts.tailSec ?? 2;
   const duration = Math.max(0.05, end - start + tail);
   const frames = Math.ceil(duration * sampleRate);
-  const ctx = new OfflineAudioContext(2, frames, sampleRate);
+  const lead = Math.round(PRE_ROLL * sampleRate);
+  const ctx = new OfflineAudioContext(2, lead + frames, sampleRate);
 
   const masterIn = ctx.createGain();
   const masterGain = ctx.createGain();
@@ -53,7 +67,7 @@ export async function renderRange(start, end, opts = {}) {
 
     const from = Math.max(clip.start, start);
     const until = Math.min(clipEnd, end);
-    const when = from - start;
+    const when = lead / sampleRate + (from - start);
 
     const effRate = clip.rate * Math.pow(2, (clip.detune || 0) / 1200);
     const src = ctx.createBufferSource();
@@ -70,9 +84,16 @@ export async function renderRange(start, end, opts = {}) {
     src.start(when, srcOffset, Math.min(playSecs * effRate, src.buffer.duration - srcOffset));
   }
 
-  if (opts.onProgress) trackProgress(ctx, duration, opts.onProgress);
+  if (opts.onProgress) trackProgress(ctx, PRE_ROLL + duration, opts.onProgress);
   const rendered = await ctx.startRendering();
-  return rendered;
+  return sliceBuffer(rendered, lead, frames);
+}
+
+/** `count` frames of `buffer` from `from`, as a new buffer. */
+export function sliceBuffer(buffer, from, count) {
+  const out = new AudioBuffer({ numberOfChannels: buffer.numberOfChannels, length: Math.max(1, count), sampleRate: buffer.sampleRate });
+  for (let c = 0; c < buffer.numberOfChannels; c++) out.copyToChannel(buffer.getChannelData(c).subarray(from, from + count), c);
+  return out;
 }
 
 /** OfflineAudioContext has no progress event; suspend at intervals to fake one. */

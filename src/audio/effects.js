@@ -31,7 +31,29 @@ export function buildChain(ctx, defs, input, output, offline = false) {
     live.push(fx);
   }
   node.connect(output);
+  if (!offline && live.length) prime(ctx, input);
   return live;
+}
+
+/**
+ * Wake a freshly built live chain.
+ *
+ * The browser does not run a node whose input is silent, so a compressor built
+ * while nothing is playing sits untouched until the first note reaches it —
+ * and a DynamicsCompressorNode's very first act is to duck by up to 14 dB
+ * while its detector comes up, recovering at its release rate. Heard live,
+ * that is the first note after adding, bypassing or reordering an insert
+ * coming in quiet. Two seconds of a signal 400 dB down (not silence, as far as
+ * the graph is concerned) gets that over with before anything plays, and is
+ * the live counterpart of the bounce's pre-roll in render.js.
+ */
+function prime(ctx, input) {
+  const src = ctx.createConstantSource();
+  src.offset.value = 1e-20;
+  src.connect(input);
+  src.onended = () => src.disconnect();
+  src.start();
+  src.stop(ctx.currentTime + 2);
 }
 
 export function disposeChain(live) {
