@@ -134,7 +134,9 @@ test("in the app: a gate on a track boots as a passthrough, then becomes the gat
   for (let i = 0; i < 100 && daw.engine.liveEffect(track.id, fx.id)?.pending; i++) await sleep(30);
   const live = daw.engine.liveEffect(track.id, fx.id);
   assert(live && !live.pending && live.node, "the chain was not rebuilt with the real gate");
-  assert(Math.abs(daw.engine.latency.total - 0.005) < 1e-6, `engine latency ${daw.engine.latency.total}`);
+  // Look-ahead is a whole number of samples at the engine's rate.
+  const wantLatency = Math.round(0.005 * daw.engine.sampleRate) / daw.engine.sampleRate;
+  assert(Math.abs(daw.engine.latency.total - wantLatency) < 1e-9, `engine latency ${daw.engine.latency.total}, expected ${wantLatency}`);
 
   const rate = daw.engine.sampleRate;
   const r = noise(0.002, 9);
