@@ -4,13 +4,14 @@
 // The mapping from a parameter's fields to a widget is documented in
 // docs/ui-components.md.
 
-import { $, el, clamp, coalesce, fmtDb, fmtDur, toast, popupMenu } from "../util.js";
+import { $, el, clamp, coalesce, dialog, fmtDb, fmtDur, toast, popupMenu } from "../util.js";
 import {
   assets,
   bus,
   changed,
   clipById,
   clipMaxDuration,
+  clipSourceRate,
   pushUndo,
   state,
   trackById,
@@ -23,6 +24,8 @@ import { sliderRow, parseDb, parsePan } from "./controls.js";
 import { drawPeaks } from "../audio/peaks.js";
 import { tunerDisplay } from "./tuner.js";
 import { geqView } from "./geq.js";
+import { STRETCH_MODES } from "../audio/stretch.js";
+import { stretchProgress } from "../audio/clipaudio.js";
 import { GEQ31_BANDS, GEQ31_Q } from "../plugins/geq31.js";
 
 let body, titleEl;
@@ -48,6 +51,7 @@ export function initInspector() {
   bus.on("tracks", refresh);
   bus.on("project", refresh);
   bus.on("assets", refresh);
+  bus.on("stretch", refresh);
   bus.on("audioinput", () => mode.kind === "track" && refresh());
   render();
 }
@@ -224,24 +228,48 @@ function renderClip() {
         log: true,
         prec: 3,
         unit: "×",
-        onChange: (v) =>
-          each((c) => {
-            // Keep the clip's audible content: the timeline length scales with rate.
-            const srcLen = c.duration * c.rate;
-            c.rate = v;
-            c.duration = clamp(srcLen / v, 0.02, clipMaxDuration(c));
-          }, "clip rate"),
+        onChange: (v) => each((c) => setClipRate(c, v), "clip rate"),
       }).root,
+      // The same setting, the two other ways people think about it.
+      row(
+        "Length",
+        numField(100 / clip.rate, 0.1, (v) => each((c) => setClipRate(c, 100 / clamp(v || 100, 25, 400)), "clip rate")),
+        el("span.val", null, "%"),
+      ),
+      row(
+        "Source BPM",
+        numField(state.project.bpm / clip.rate, 0.01, (v) => each((c) => setClipRate(c, state.project.bpm / clamp(v || state.project.bpm, 20, 999)), "clip rate")),
+        el("span.val", { title: "The tempo this clip was recorded at, if it now sits in time with the project" }, `→ ${state.project.bpm}`),
+      ),
       sliderRow({
-        label: "Detune",
-        value: clip.detune,
-        min: -2400,
-        max: 2400,
+        label: "Pitch",
+        value: (clip.detune || 0) / 100,
+        min: -24,
+        max: 24,
         def: 0,
-        prec: 0,
-        unit: " ct",
-        onChange: (v) => each((c) => (c.detune = v), "detune"),
+        prec: 2,
+        unit: " st",
+        onChange: (v) => each((c) => (c.detune = Math.round(v * 100)), "pitch"),
       }).root,
+      row(
+        "Pitch lock",
+        el("input", {
+          type: "checkbox",
+          checked: !!clip.pitchLock,
+          title: "On: Rate changes length only and Pitch changes pitch only (time stretch). Off: they are one resampling and move together, like tape.",
+          onchange: (e) =>
+            each((c) => {
+              // Keep what the clip covers in the source: with the lock off, pitch is part of the speed.
+              const srcLen = c.duration * clipSourceRate(c);
+              c.pitchLock = e.target.checked;
+              c.duration = clamp(srcLen / clipSourceRate(c), 0.02, clipMaxDuration(c));
+            }, "pitch lock"),
+        }),
+        clip.pitchLock
+          ? select(STRETCH_MODES, clip.stretchMode ?? "auto", (v) => each((c) => (c.stretchMode = v), "stretch mode"))
+          : el("span.val", { title: "Pitch follows speed, like tape" }, "off"),
+      ),
+      stretchNote(clip),
       el(
         "div.btnrow",
         null,
@@ -285,7 +313,7 @@ function paintClipWave(canvas, clip, asset) {
   c.fillStyle = "#2c3142";
   drawPeaks(c, asset.peaks, 0, asset.peaks.frames, 0, 0, w, h);
   // Highlight the part of the source this clip uses.
-  const effRate = clip.rate * Math.pow(2, (clip.detune || 0) / 1200);
+  const effRate = clipSourceRate(clip);
   const x0 = (clip.offset / asset.duration) * w;
   const x1 = ((clip.offset + clip.duration * effRate) / asset.duration) * w;
   c.save();
@@ -313,21 +341,72 @@ function normalizeClipGain() {
   toast("Clip gain set for -0.5 dB peak", "ok");
 }
 
-/** Set the clip rate so its length becomes a whole number of bars. */
+/** Change a clip's rate, keeping the stretch of source it covers: the timeline length follows. */
+function setClipRate(c, rate) {
+  const srcLen = c.duration * c.rate;
+  c.rate = clamp(rate, 0.25, 4);
+  c.duration = clamp(srcLen / c.rate, 0.02, clipMaxDuration(c));
+}
+
+/** One line under the pitch controls saying what a pitch-locked clip is doing. */
+function stretchNote(clip) {
+  if (!clip.pitchLock) return null;
+  const p = stretchProgress(clip);
+  const modes = { auto: "picked from the material", mono: "one voice or instrument (WSOLA)", poly: "chords and mixes (phase vocoder)", drums: "slices at the hits" };
+  const text =
+    p === null
+      ? `Mode: ${modes[clip.stretchMode ?? "auto"]}. Nothing to stretch at rate 1 and pitch 0.`
+      : p < 1
+        ? `Rendering the stretch… ${Math.round(p * 100)}%. Until it is done the clip plays resampled, so its pitch is off.`
+        : `Mode: ${modes[clip.stretchMode ?? "auto"]}.`;
+  return el("div.insp-empty", null, text);
+}
+
+/** Fit the clip to a whole number of bars — by stretching it, or by resampling like tape. */
 function matchTempo(clip) {
-  const bars = prompt("Stretch this clip to how many bars?", "4");
-  if (bars == null) return;
-  const n = Number(bars);
-  if (!Number.isFinite(n) || n <= 0) return;
+  let bars = 4;
+  let keepPitch = true;
   const barSec = (60 / state.project.bpm) * state.project.sigNum;
-  const targetLen = n * barSec;
-  pushUndo("match tempo");
-  const srcLen = clip.duration * clip.rate;
-  clip.rate = clamp(srcLen / targetLen, 0.05, 8);
-  clip.duration = targetLen;
-  changed("clips");
-  engine.invalidate();
-  toast(`Rate ${clip.rate.toFixed(3)}× · ${n} bars`, "ok");
+  dialog(
+    "Match tempo",
+    (body) => {
+      const guess = Math.max(1, Math.round(clip.duration / barSec));
+      bars = guess;
+      body.append(
+        row(
+          "Fit to",
+          el("input.num", { type: "number", min: 0.25, step: 1, value: guess, onchange: (e) => (bars = Number(e.target.value)) }),
+          el("span.val", null, `bars at ${state.project.bpm} BPM`),
+        ),
+        row(
+          "Keep pitch",
+          el("input", { type: "checkbox", checked: true, onchange: (e) => (keepPitch = e.target.checked) }),
+          el("span.val", null, "time stretch, rather than resample"),
+        ),
+      );
+    },
+    [
+      { label: "Cancel" },
+      {
+        label: "Match",
+        primary: true,
+        onClick: () => {
+          if (!Number.isFinite(bars) || bars <= 0) return false;
+          const targetLen = bars * barSec;
+          pushUndo("match tempo");
+          const srcLen = clip.duration * clipSourceRate(clip);
+          if (keepPitch) clip.pitchLock = true;
+          // What is left of the speed once any (unlocked) detune has had its share.
+          const pitchPart = clipSourceRate(clip) / clip.rate;
+          clip.rate = clamp(srcLen / targetLen / pitchPart, keepPitch ? 0.25 : 0.05, keepPitch ? 4 : 8);
+          clip.duration = srcLen / clipSourceRate(clip);
+          changed("clips");
+          engine.invalidate();
+          toast(`${(100 / clip.rate).toFixed(1)}% · ${bars} bars${keepPitch ? " · pitch kept" : ""}`, "ok");
+        },
+      },
+    ],
+  );
 }
 
 /* ── track / master ───────────────────────────────────────────────────── */

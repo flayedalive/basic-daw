@@ -46,6 +46,7 @@ const KEYMAP = [
   ["M", "Mute selected clips"],
   ["← →", "Nudge by one grid step (⇧ = fine)"],
   ["Alt ← →", "Resize selection by one grid step"],
+  ["Alt-drag a clip edge", "Stretch the clip (pitch locked) instead of trimming it"],
   ["Ctrl/⌘ A", "Select all clips"],
   ["Esc", "Clear selection"],
   ["P", "Drop a marker at the playhead"],

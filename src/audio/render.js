@@ -8,6 +8,7 @@ import { buildChain } from "./effects.js";
 import { scheduleClipEnvelope } from "./engine.js";
 import { encodeWav } from "./wav.js";
 import { measureBuffer, gainToTarget } from "./loudness.js";
+import { playbackOf, prepareStretches } from "./clipaudio.js";
 
 /**
  * Seconds of silence rendered ahead of the range and then thrown away.
@@ -56,6 +57,10 @@ export async function renderRange(start, end, opts = {}) {
     inputs.set(track.id, input);
   }
 
+  // Pitch-locked clips play a stretched copy; playback may have been getting by
+  // on a resampled stand-in while it rendered, but a bounce waits for the real thing.
+  await prepareStretches(project.clips);
+
   for (const clip of project.clips) {
     if (clip.mute) continue;
     const input = inputs.get(clip.trackId);
@@ -70,19 +75,20 @@ export async function renderRange(start, end, opts = {}) {
     const until = Math.min(clipEnd, end);
     const when = lead / sampleRate + (from - start);
 
-    const effRate = clip.rate * Math.pow(2, (clip.detune || 0) / 1200);
+    // The same buffer and numbers the engine plays the clip with.
+    const pb = playbackOf(clip, asset);
     const src = ctx.createBufferSource();
-    src.buffer = clip.reverse ? reverseCopy(ctx, asset.buffer) : asset.buffer;
-    src.playbackRate.value = clip.rate;
-    if (clip.detune) src.detune.value = clip.detune;
+    src.buffer = pb.buffer;
+    src.playbackRate.value = pb.playbackRate;
+    if (pb.detune) src.detune.value = pb.detune;
 
     const g = ctx.createGain();
     scheduleClipEnvelope(g.gain, clip, from, until, when);
     src.connect(g).connect(input);
 
-    const srcOffset = clamp(clip.offset + (from - clip.start) * effRate, 0, src.buffer.duration);
+    const srcOffset = clamp(pb.offset + (from - clip.start) * pb.consume, 0, src.buffer.duration);
     const playSecs = until - from;
-    src.start(when, srcOffset, Math.min(playSecs * effRate, src.buffer.duration - srcOffset));
+    src.start(when, srcOffset, Math.min(playSecs * pb.consume, src.buffer.duration - srcOffset));
   }
 
   if (opts.onProgress) trackProgress(ctx, PRE_ROLL + duration, opts.onProgress);
@@ -109,15 +115,6 @@ function trackProgress(ctx, duration, onProgress) {
   }
 }
 
-function reverseCopy(ctx, buffer) {
-  const out = ctx.createBuffer(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
-  for (let c = 0; c < buffer.numberOfChannels; c++) {
-    const from = buffer.getChannelData(c);
-    const to = out.getChannelData(c);
-    for (let i = 0, n = from.length; i < n; i++) to[i] = from[n - 1 - i];
-  }
-  return out;
-}
 
 /** Multiply every sample of `buffer` by `gainDb`, in place. */
 export function applyGainDb(buffer, gainDb) {

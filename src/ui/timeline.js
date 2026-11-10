@@ -6,7 +6,7 @@
 // stored: x = (t - scrollX) * pxPerSec, y = cumulative track heights.
 
 import { $, clamp, popupMenu, toast, uid } from "../util.js";
-import {
+import { clipSourceRate,
   assets,
   bus,
   changed,
@@ -20,6 +20,7 @@ import {
   barSeconds,
   clipMaxDuration,
 } from "../state.js";
+import { isStretched, stretchProgress } from "../audio/clipaudio.js";
 import { drawPeaks } from "../audio/peaks.js";
 import { engine } from "../audio/engine.js";
 
@@ -349,7 +350,7 @@ function paintClip(clip) {
   // Waveform.
   const asset = assets.get(clip.assetId);
   if (asset?.peaks && w > 3) {
-    const effRate = clip.rate * Math.pow(2, (clip.detune || 0) / 1200);
+    const effRate = clipSourceRate(clip);
     const sr = asset.peaks.sampleRate;
     const visX0 = Math.max(x, 0);
     const visX1 = Math.min(x + w, width);
@@ -408,7 +409,11 @@ function paintClip(clip) {
     lctx.fillStyle = "#0d0f14";
     lctx.font = "9px ui-monospace, SFMono-Regular, monospace";
     lctx.textBaseline = "middle";
-    const label = `${clip.mute ? "· " : ""}${clip.name}${clip.reverse ? " ⟲" : ""}`;
+    // ⇔ marks a pitch-locked stretch; a percentage shows while its copy renders
+    // (until then the clip plays resampled, so its pitch is off).
+    const sp = stretchProgress(clip);
+    const stretchTag = sp === null ? "" : sp < 1 ? ` ⇔ ${Math.round(sp * 100)}%` : " ⇔";
+    const label = `${clip.mute ? "· " : ""}${clip.name}${clip.reverse ? " ⟲" : ""}${stretchTag}`;
     lctx.fillText(label, x + 4, y + 6, Math.max(0, w - 8));
   }
 
@@ -448,6 +453,7 @@ function onLaneHover(e) {
   const { x, y } = localPos(e);
   const hit = clipAt(x, y);
   hover = hit ? { id: hit.clip.id, zone: hitZone(x, y, hit) } : null;
+  lastY = y;
   lanes.style.cursor = !hover
     ? "default"
     : hover.zone === "trim-l" || hover.zone === "trim-r"
@@ -458,6 +464,7 @@ function onLaneHover(e) {
   setStatus(hoverStatus(hit, x));
 }
 
+let lastY = 0;
 function hoverStatus(hit, x) {
   const t = xToTime(x);
   const time = `${t.toFixed(3)}s`;
@@ -465,8 +472,8 @@ function hoverStatus(hit, x) {
   const c = hit.clip;
   const a = assets.get(c.assetId);
   return `${c.name} · ${c.duration.toFixed(3)}s @ ${c.start.toFixed(3)}s · src ${c.offset.toFixed(3)}s${
-    c.rate !== 1 ? ` · rate ${c.rate.toFixed(3)}` : ""
-  }${a ? ` · ${a.channels}ch ${a.sampleRate}Hz` : ""}`;
+    c.rate !== 1 ? ` · rate ${c.rate.toFixed(3)}${c.pitchLock ? " (pitch locked)" : ""}` : ""
+  }${hit && (hitZone(x, lastY, hit) === "trim-l" || hitZone(x, lastY, hit) === "trim-r") ? " · Alt-drag to stretch" : ""}${a ? ` · ${a.channels}ch ${a.sampleRate}Hz` : ""}`;
 }
 
 export function setStatus(text) {
@@ -527,6 +534,10 @@ function onLanePointerDown(e) {
       changed("clips");
     }
     dragOp = { kind: "move", grabTime: xToTime(x), grabY: y, orig: snapshot(), dTime: 0, dTrack: 0 };
+  } else if ((zone === "trim-l" || zone === "trim-r") && e.altKey) {
+    // Alt-drag an edge: stretch the clip instead of trimming it.
+    pushUndo("stretch clip");
+    dragOp = { kind: zone === "trim-l" ? "stretch-l" : "stretch-r", id: clip.id, orig: snapshot(), grabTime: xToTime(x) };
   } else if (zone === "trim-l" || zone === "trim-r") {
     pushUndo("trim clip");
     dragOp = { kind: zone, id: clip.id, orig: snapshot(), grabTime: xToTime(x) };
@@ -620,7 +631,7 @@ function applyDrag(x, y, ev) {
   const o = dragOp.orig.get(dragOp.id);
   if (!clip || !o) return;
   const asset = assets.get(clip.assetId);
-  const effRate = clip.rate * Math.pow(2, (clip.detune || 0) / 1200);
+  const effRate = clipSourceRate(clip);
 
   if (dragOp.kind === "trim-l") {
     let newStart = fine ? t : snapTime(t);
@@ -635,6 +646,21 @@ function applyDrag(x, y, ev) {
     let end = fine ? t : snapTime(t);
     const maxDur = asset ? (asset.duration - clip.offset) / effRate : Infinity;
     clip.duration = clamp(end - clip.start, 0.02, maxDur);
+    changed("clips");
+  } else if (dragOp.kind === "stretch-l" || dragOp.kind === "stretch-r") {
+    // The same stretch of source, fitted to a new length: the far edge stays
+    // put and the rate follows. Pitch lock comes on, so it is a true stretch —
+    // heard resampled while dragging, rendered properly once the edge is let go.
+    const edge = fine ? t : snapTime(t);
+    const srcLen = o.duration * o.rate;
+    const end = o.start + o.duration;
+    const want = dragOp.kind === "stretch-r" ? edge - o.start : end - edge;
+    const rate = clamp(srcLen / Math.max(0.02, want), 0.25, 4);
+    clip.rate = rate;
+    clip.pitchLock = true;
+    clip.duration = srcLen / rate;
+    if (dragOp.kind === "stretch-l") clip.start = Math.max(0, end - clip.duration);
+    setStatus(`Stretch ${(100 / rate).toFixed(1)}% · ${clip.duration.toFixed(3)}s`);
     changed("clips");
   } else if (dragOp.kind === "fade-i") {
     clip.fadeIn = clamp(t - clip.start, 0, clip.duration);
@@ -929,7 +955,7 @@ export function splitSelection(at = state.playhead) {
   }
   pushUndo("split");
   for (const c of targets) {
-    const effRate = c.rate * Math.pow(2, (c.detune || 0) / 1200);
+    const effRate = clipSourceRate(c);
     const left = at - c.start;
     const right = { ...c, id: uid("clip") };
     right.start = at;

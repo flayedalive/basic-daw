@@ -281,3 +281,45 @@ export async function openApp() {
 }
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Record what the running app's engine sends to its output for `seconds`,
+ * starting now. Returns an AudioBuffer at the engine's sample rate. Start
+ * playback after calling this; the recording begins with whatever silence
+ * precedes it.
+ */
+export async function captureEngine(win, seconds) {
+  const { engine } = win.daw;
+  const ctx = engine.ensure();
+  await ctx.resume();
+  if (!ctx.__testCapture) {
+    await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([CAPTURE], { type: "text/javascript" })));
+    ctx.__testCapture = true;
+  }
+  const frames = Math.round(seconds * ctx.sampleRate);
+  const cap = new win.AudioWorkletNode(ctx, "test-capture", {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    channelCount: 2,
+    channelCountMode: "explicit",
+    processorOptions: { start: 0, frames },
+  });
+  const mute = ctx.createGain();
+  mute.gain.value = 0;
+  engine.master.gain.connect(cap).connect(mute).connect(ctx.destination);
+  const done = new Promise((res) => (cap.port.onmessage = (e) => res(e.data))).then((data) => {
+    engine.master.gain.disconnect(cap);
+    const out = new AudioBuffer({ numberOfChannels: 2, length: frames, sampleRate: ctx.sampleRate });
+    out.copyToChannel(data.L, 0);
+    out.copyToChannel(data.R, 1);
+    return out;
+  });
+  return { done };
+}
+
+/** Index of the first sample of channel 0 above `threshold`. */
+export function firstSound(buf, threshold = 1e-4) {
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) if (Math.abs(d[i]) > threshold) return i;
+  return -1;
+}

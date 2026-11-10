@@ -5,6 +5,7 @@
 import { $, toast } from "./util.js";
 import { bus, state } from "./state.js";
 import { engine } from "./audio/engine.js";
+import { syncStretches } from "./audio/clipaudio.js";
 import { initTimeline, draw as drawTimeline, resize as resizeTimeline, zoomToFit } from "./ui/timeline.js";
 import { initScrollbars } from "./ui/scrollbars.js";
 import { initTracks, updateTrackMeters } from "./ui/tracks.js";
@@ -48,6 +49,19 @@ async function boot() {
   // An insert can reference pool audio (a cabinet IR); push parameters again
   // once that audio has finished decoding or has been removed.
   bus.on("assets", () => engine.updateMix());
+  // Pitch-locked clips play stretched copies rendered in the background. Start
+  // (or abandon) those renders once edits settle, and reschedule when one lands.
+  let settleTimer = 0;
+  const settle = () => {
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(syncStretches, 300);
+  };
+  for (const ev of ["clips", "project", "assets"]) bus.on(ev, settle);
+  bus.on("stretch", () => {
+    engine.invalidate();
+    drawTimeline();
+  });
+  bus.on("stretch-progress", drawTimeline);
   // Arming or monitoring a track (or loading a session) re-routes live input.
   for (const evt of ["mix", "tracks", "project"]) bus.on(evt, () => input.syncMonitoring());
   let lastInputError = 0;

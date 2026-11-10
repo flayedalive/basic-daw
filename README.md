@@ -48,7 +48,11 @@ Everything runs client-side, so nothing you import ever leaves your machine.
 
 **Clips**
 - Gain, fade in/out with equal-power / linear / exponential shapes
-- Playback rate and detune (±2400 cents), reverse, mute
+- Playback rate and pitch (±24 semitones), reverse, mute
+- Time stretch with pitch lock: speed and pitch change independently. Alt-drag a
+  clip edge to stretch it, or set a percentage, a source tempo or a bar count.
+  Four modes — one voice (WSOLA), chords and mixes (phase vocoder with
+  transients preserved), drums (slices moved, hits untouched), or auto
 - "Match tempo" stretches a clip to a whole number of bars
 - Normalize gain from the analysed source peak
 
@@ -141,6 +145,8 @@ src/
     loudness.js       BS.1770 loudness, loudness range, true peak
     fft.js            radix-2 FFT
     resample.js       windowed-sinc sample-rate conversion
+    stretch.js        time stretch / pitch shift: WSOLA, phase vocoder, drum slicing
+    clipaudio.js      what a clip plays: its asset, or a cached stretched copy
     peaks.js          min/max peak pyramid + waveform drawing
     wav.js            WAV encode, and a decoder for what browsers reject
   plugins/
@@ -232,8 +238,11 @@ There is a `/daw-plugin` skill that walks an agent through designing one to spec
 
 ## Known limits
 
-- Rate changes are resampling, not time-stretching: speed and pitch move
-  together. There is no phase vocoder.
+- With pitch lock off, rate changes are resampling: speed and pitch move
+  together, like tape. Turn pitch lock on for a time stretch
+- Stretch quality is good within about 0.8–1.25× and degrades beyond it; the
+  mono mode moves formants with a pitch shift (a vocal shifted far sounds
+  chipmunked)
 - Overlapping clips on one track both play; no automatic crossfade.
 - No parameter automation lanes yet — mixer moves are static per session.
 - Recording sets the loop aside: a take runs linearly from where it started,

@@ -15,6 +15,7 @@
 import { clamp, dbToGain } from "../util.js";
 import { assets, state, trackAudible, beatSeconds } from "../state.js";
 import { buildChain, disposeChain } from "./effects.js";
+import { playbackOf } from "./clipaudio.js";
 import { signatureOf } from "../plugins/registry.js";
 
 const LOOKAHEAD = 0.35; // seconds of audio scheduled ahead of the clock
@@ -377,15 +378,16 @@ class Engine {
 
   spawnClip(clip, asset, track, fromPos, untilPos, when) {
     const ctx = this.ctx;
-    const buffer = clip.reverse ? reversedBuffer(ctx, asset) : asset.buffer;
+    // The asset itself, or the stretched copy a pitch-locked clip plays.
+    const pb = playbackOf(clip, asset);
+    const buffer = pb.buffer;
     const src = ctx.createBufferSource();
     src.buffer = buffer;
-    src.playbackRate.value = clip.rate;
-    if (clip.detune) src.detune.value = clip.detune;
+    src.playbackRate.value = pb.playbackRate;
+    if (pb.detune) src.detune.value = pb.detune;
 
-    const effRate = clip.rate * Math.pow(2, (clip.detune || 0) / 1200);
     const intoClip = fromPos - clip.start; // timeline seconds already elapsed
-    const srcOffset = clip.offset + intoClip * effRate;
+    const srcOffset = pb.offset + intoClip * pb.consume;
     const playSecs = untilPos - fromPos;
 
     const gainNode = ctx.createGain();
@@ -393,7 +395,7 @@ class Engine {
 
     src.connect(gainNode).connect(this.trackInput(track.id));
     const maxSrc = Math.max(0, buffer.duration - srcOffset);
-    src.start(when, clamp(srcOffset, 0, buffer.duration), Math.min(playSecs * effRate, maxSrc));
+    src.start(when, clamp(srcOffset, 0, buffer.duration), Math.min(playSecs * pb.consume, maxSrc));
     src.stop(when + playSecs + 0.02);
 
     this.sources.add(src);
@@ -514,20 +516,6 @@ function peakOf(buf) {
     if (a > peak) peak = a;
   }
   return peak;
-}
-
-/** Reversed copies are cached on the asset: reversing a 5-minute stem isn't free. */
-function reversedBuffer(ctx, asset) {
-  if (asset.reversed?.sampleRate === ctx.sampleRate) return asset.reversed;
-  const src = asset.buffer;
-  const out = ctx.createBuffer(src.numberOfChannels, src.length, src.sampleRate);
-  for (let c = 0; c < src.numberOfChannels; c++) {
-    const from = src.getChannelData(c);
-    const to = out.getChannelData(c);
-    for (let i = 0, n = from.length; i < n; i++) to[i] = from[n - 1 - i];
-  }
-  asset.reversed = out;
-  return out;
 }
 
 const FADE_STEPS = 33;

@@ -176,15 +176,27 @@ export function newClip(assetId, trackId, start, opts = {}) {
     detune: opts.detune ?? 0,
     reverse: opts.reverse ?? false,
     mute: opts.mute ?? false,
+    // With pitch lock on, `rate` changes length only and `detune` pitch only
+    // (a stretched copy is rendered); off, they are one resampling and move together.
     pitchLock: opts.pitchLock ?? false,
+    stretchMode: opts.stretchMode ?? "auto", // auto | mono | poly | drums
   };
+}
+
+/**
+ * Source seconds a clip consumes per timeline second. Detune is part of that
+ * for a resampled clip (pitching up plays the source faster) and is not for a
+ * pitch-locked one (its pitch shift is rendered into the stretched copy).
+ */
+export function clipSourceRate(clip) {
+  return clip.pitchLock ? clip.rate : clip.rate * Math.pow(2, (clip.detune || 0) / 1200);
 }
 
 /** Playable seconds left in the source from `offset`, at the clip's rate. */
 export function clipMaxDuration(clip) {
   const asset = assets.get(clip.assetId);
   if (!asset) return clip.duration;
-  return Math.max(0.001, (asset.duration - clip.offset) / clip.rate);
+  return Math.max(0.001, (asset.duration - clip.offset) / clipSourceRate(clip));
 }
 
 /* ── grid ───────────────────────────────────────────────────────────────── */
