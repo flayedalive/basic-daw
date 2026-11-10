@@ -1,0 +1,110 @@
+{
+  "id": "pedal.distortion",
+  "name": "Distortion",
+  "category": "Distortion",
+  "description": "Hard-clipping distortion with a tightening high-pass before the clipper and a sweepable filter after it.",
+  "params": [
+    {
+      "key": "drive",
+      "label": "Drive",
+      "min": 1,
+      "max": 150,
+      "def": 30,
+      "log": true,
+      "prec": 1
+    },
+    {
+      "key": "tight",
+      "label": "Tight",
+      "min": 20,
+      "max": 500,
+      "def": 90,
+      "unit": "Hz",
+      "log": true,
+      "hint": "High-pass before the clipper. Raise it to stop the low strings turning to mud."
+    },
+    {
+      "key": "filter",
+      "label": "Filter",
+      "min": 600,
+      "max": 12000,
+      "def": 4500,
+      "unit": "Hz",
+      "log": true
+    },
+    {
+      "key": "level",
+      "label": "Level",
+      "min": -36,
+      "max": 6,
+      "def": -19,
+      "unit": "dB"
+    }
+  ],
+  "graph": {
+    "nodes": {
+      "tight": {
+        "type": "biquad",
+        "filter": "highpass"
+      },
+      "sh": {
+        "type": "shaper",
+        "oversample": "4x",
+        "curve": {
+          "kind": "expr",
+          "size": 4096,
+          "expr": "clamp(drive * x, 0 - 1, 1) * 0.8 + tanh(drive * x) * 0.2"
+        }
+      },
+      "post": {
+        "type": "biquad",
+        "filter": "lowpass"
+      },
+      "dc": {
+        "type": "biquad",
+        "filter": "highpass"
+      }
+    },
+    "connect": [
+      [
+        "in",
+        "tight",
+        "sh",
+        "dc",
+        "post",
+        "out"
+      ]
+    ],
+    "bind": [
+      {
+        "param": "tight",
+        "to": "tight.frequency"
+      },
+      {
+        "to": "tight.Q",
+        "map": "0 - 3.0103"
+      },
+      {
+        "to": "dc.frequency",
+        "map": "30"
+      },
+      {
+        "to": "dc.Q",
+        "map": "0 - 3.0103"
+      },
+      {
+        "param": "filter",
+        "to": "post.frequency"
+      },
+      {
+        "to": "post.Q",
+        "map": "0 - 3.0103"
+      },
+      {
+        "param": "level",
+        "to": "out.gain",
+        "map": "db2gain(x)"
+      }
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "pedal.boost",
+  "name": "Boost",
+  "category": "Distortion",
+  "description": "Clean boost for pushing whatever comes next. Tight turns it into a treble booster; Bright adds a shelf above 3 kHz.",
+  "params": [
+    { "key": "gain", "label": "Gain", "min": 0, "max": 24, "def": 6, "unit": "dB" },
+    { "key": "tight", "label": "Tight", "min": 20, "max": 1000, "def": 20, "unit": "Hz", "log": true },
+    { "key": "bright", "label": "Bright", "min": 0, "max": 12, "def": 0, "unit": "dB" }
+  ],
+  "graph": {
+    "nodes": {
+      "hp": { "type": "biquad", "filter": "highpass" },
+      "shelf": { "type": "biquad", "filter": "highshelf" }
+    },
+    "connect": [["in", "hp", "shelf", "out"]],
+    "bind": [
+      { "param": "tight", "to": "hp.frequency" },
+      { "to": "hp.Q", "map": "0 - 3.0103" },
+      { "to": "shelf.frequency", "map": "3000" },
+      { "param": "bright", "to": "shelf.gain" },
+      { "param": "gain", "to": "out.gain", "map": "db2gain(x)" }
+    ]
+  }
+}

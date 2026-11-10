@@ -240,6 +240,14 @@ All take an optional `size` (default 2048). A curve is rebuilt only when its
 inputs change, so a knob that does not feed it costs nothing — except for
 `kind: "expr"`, which conservatively rebuilds on any parameter change.
 
+**A curve must map 0 to 0.** An asymmetric shape such as `tanh(drive * x + bias)`
+outputs a constant when the input is silent. Live, that offset settles through
+whatever DC-blocking filter follows long before you press play; a bounce starts
+from cold, so it opens with a click playback never had. Subtract the curve's own
+value at zero, as `tube.json` and `fuzz.json` do, and follow an asymmetric
+shaper with a high-pass around 20–60 Hz to remove the DC that appears while a
+note sounds. `validate.mjs --build` warns when a curve breaks this.
+
 Set `oversample` to `4x` for anything with gain before it. Leave it at `none`
 when the aliasing *is* the effect, as in `bitcrusher.json`.
 

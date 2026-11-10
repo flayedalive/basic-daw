@@ -1,0 +1,102 @@
+{
+  "id": "pedal.overdrive",
+  "name": "Overdrive",
+  "category": "Distortion",
+  "description": "Tube-Screamer-style overdrive: only the band above ~720 Hz is driven into a soft clipper and the clean signal is summed back in, so the lows stay tight and the mids push forward.",
+  "params": [
+    {
+      "key": "drive",
+      "label": "Drive",
+      "min": 1,
+      "max": 60,
+      "def": 12,
+      "log": true,
+      "prec": 1
+    },
+    {
+      "key": "tone",
+      "label": "Tone",
+      "min": 700,
+      "max": 8000,
+      "def": 3000,
+      "unit": "Hz",
+      "log": true
+    },
+    {
+      "key": "level",
+      "label": "Level",
+      "min": -24,
+      "max": 12,
+      "def": -9,
+      "unit": "dB"
+    }
+  ],
+  "graph": {
+    "nodes": {
+      "hp": {
+        "type": "biquad",
+        "filter": "highpass"
+      },
+      "sh": {
+        "type": "shaper",
+        "oversample": "4x",
+        "curve": {
+          "kind": "tanh",
+          "amount": "drive",
+          "size": 4096
+        }
+      },
+      "clean": {
+        "type": "gain"
+      },
+      "sum": {
+        "type": "gain"
+      },
+      "tone": {
+        "type": "biquad",
+        "filter": "lowpass"
+      }
+    },
+    "connect": [
+      [
+        "in",
+        "clean",
+        "sum"
+      ],
+      [
+        "in",
+        "hp",
+        "sh",
+        "sum"
+      ],
+      [
+        "sum",
+        "tone",
+        "out"
+      ]
+    ],
+    "bind": [
+      {
+        "to": "hp.frequency",
+        "map": "720"
+      },
+      {
+        "to": "hp.Q",
+        "map": "0 - 3.0103"
+      },
+      {
+        "param": "tone",
+        "to": "tone.frequency"
+      },
+      {
+        "to": "tone.Q",
+        "map": "0 - 3.0103"
+      },
+      {
+        "param": "level",
+        "to": "out.gain",
+        "map": "db2gain(x)"
+      }
+    ]
+  }
+}

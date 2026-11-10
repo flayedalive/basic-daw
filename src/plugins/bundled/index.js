@@ -8,7 +8,11 @@
 // To add one: drop the file in this folder and add its name below. Each is a
 // worked example of a different manifest feature — see docs/plugins.md.
 
-const FILES = ["tremolo", "autowah", "bitcrusher", "tube", "wavefolder", "plate", "tilt", "haas", "pingpong"];
+const FILES = [
+  "tremolo", "autowah", "bitcrusher", "tube", "wavefolder", "plate", "tilt", "haas", "pingpong",
+  // the pedal pack
+  "overdrive", "distortion", "fuzz", "boost", "phaser", "flanger", "octaveup",
+];
 
 /** Fetch every bundled manifest. Returns { manifests, errors }. */
 export async function loadBundled() {

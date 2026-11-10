@@ -58,11 +58,13 @@ Everything runs client-side, so nothing you import ever leaves your machine.
   value (`-12`, `+3.5`, `-inf`, `L30`, `C`); Alt-click resets
 - CLIP lights on every strip and the master latch when a level reaches
   0 dBFS; click to clear
-- Insert chains on every track and the master, twenty-one effects out of the box:
+- Insert chains on every track and the master, twenty-eight effects out of the box:
   4-band EQ (with a live response curve), tilt EQ, filter, auto-wah, compressor,
   limiter, noise gate, delay, ping-pong echo, reverb, plate reverb, chorus,
   tremolo, saturator, tube warmth, bit crusher, wavefolder, stereo width, Haas
   widener, trim, tuner
+- A guitar pedal pack among them: overdrive, distortion, fuzz, boost, phaser,
+  flanger, octave-up
 - Bypass, reorder, remove per insert; parameters are smoothed, not stepped
 - New effects are plugins — write one as a JSON manifest, no code (see below)
 
@@ -141,7 +143,7 @@ src/
     tuner.js          the tuner insert (registered with the built-ins)
     pitch.js          YIN pitch detection and note naming, DOM-free
     loader.js         install from file / URL / text, persist to IndexedDB
-    bundled/          the nine effects written as JSON manifests
+    bundled/          the sixteen effects written as JSON manifests
   storage/db.js       IndexedDB wrapper
   ui/
     timeline.js       arrangement canvas: ruler, clips, every edit gesture

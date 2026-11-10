@@ -101,6 +101,14 @@ for (const file of files) {
         const node = fx.nodes.get(name);
         if (def.curve && !(node.curve instanceof Float32Array)) throw new Error(`node "${name}": curve was never generated`);
         if (def.ir && !node.buffer) throw new Error(`node "${name}": impulse response was never generated`);
+        // A curve that maps silence to something else puts DC on the output the
+        // moment the graph exists. Live, that settles long before you press
+        // play; a bounce starts cold, so it opens with a click playback never had.
+        if (def.curve) {
+          const c = node.curve;
+          const mid = c.length % 2 ? c[(c.length - 1) / 2] : (c[c.length / 2 - 1] + c[c.length / 2]) / 2;
+          if (Math.abs(mid) > 1e-3) console.log(`  ${yellow("!")} node "${name}": curve maps silence to ${mid.toFixed(3)}, not 0 — a bounce will start with a click (see docs/plugins.md, Curve recipes)`);
+        }
       }
 
       // A second instance in "offline" mode must reach the same values, or a

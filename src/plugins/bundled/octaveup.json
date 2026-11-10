@@ -1,0 +1,130 @@
+{
+  "id": "pedal.octaveup",
+  "name": "Octave Up",
+  "category": "Distortion",
+  "description": "Full-wave rectification folds the negative half of the wave upward, doubling the fundamental. Cleanest on single notes above the 12th fret with the neck pickup; chords turn to ring-mod clang, which is half the fun.",
+  "params": [
+    {
+      "key": "focus",
+      "label": "Focus",
+      "min": 400,
+      "max": 5000,
+      "def": 1500,
+      "unit": "Hz",
+      "log": true,
+      "hint": "Low-pass before the rectifier. Lower tracks the octave more cleanly."
+    },
+    {
+      "key": "mix",
+      "label": "Octave",
+      "min": 0,
+      "max": 1,
+      "def": 0.6
+    },
+    {
+      "key": "tone",
+      "label": "Tone",
+      "min": 1000,
+      "max": 12000,
+      "def": 5000,
+      "unit": "Hz",
+      "log": true
+    },
+    {
+      "key": "level",
+      "label": "Level",
+      "min": -24,
+      "max": 12,
+      "def": 2,
+      "unit": "dB"
+    }
+  ],
+  "graph": {
+    "nodes": {
+      "focus": {
+        "type": "biquad",
+        "filter": "lowpass"
+      },
+      "sh": {
+        "type": "shaper",
+        "oversample": "4x",
+        "curve": {
+          "kind": "expr",
+          "size": 4097,
+          "expr": "abs(x)"
+        }
+      },
+      "dc": {
+        "type": "biquad",
+        "filter": "highpass"
+      },
+      "tone": {
+        "type": "biquad",
+        "filter": "lowpass"
+      },
+      "dry": {
+        "type": "gain"
+      },
+      "wet": {
+        "type": "gain"
+      }
+    },
+    "connect": [
+      [
+        "in",
+        "dry",
+        "out"
+      ],
+      [
+        "in",
+        "focus",
+        "sh",
+        "dc",
+        "tone",
+        "wet",
+        "out"
+      ]
+    ],
+    "bind": [
+      {
+        "param": "focus",
+        "to": "focus.frequency"
+      },
+      {
+        "to": "focus.Q",
+        "map": "0 - 3.0103"
+      },
+      {
+        "to": "dc.frequency",
+        "map": "60"
+      },
+      {
+        "to": "dc.Q",
+        "map": "0 - 3.0103"
+      },
+      {
+        "param": "tone",
+        "to": "tone.frequency"
+      },
+      {
+        "to": "tone.Q",
+        "map": "0 - 3.0103"
+      },
+      {
+        "param": "mix",
+        "to": "wet.gain",
+        "map": "x * 2"
+      },
+      {
+        "param": "mix",
+        "to": "dry.gain",
+        "map": "1 - x"
+      },
+      {
+        "param": "level",
+        "to": "out.gain",
+        "map": "db2gain(x)"
+      }
+    ]
+  }
+}

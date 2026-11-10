@@ -1,0 +1,37 @@
+{
+  "id": "pedal.flanger",
+  "name": "Flanger",
+  "category": "Modulation",
+  "description": "A short LFO-swept delay with feedback, mixed against the dry signal. The delay never goes below 3 ms: a Web Audio feedback loop cannot be shorter than one render block, and holding the floor above it keeps a bounce at any sample rate identical to playback.",
+  "params": [
+    { "key": "rate", "label": "Rate", "min": 0.05, "max": 5, "def": 0.3, "unit": "Hz", "log": true, "prec": 2 },
+    { "key": "depth", "label": "Depth", "min": 0, "max": 1, "def": 0.6 },
+    { "key": "manual", "label": "Manual", "min": 3, "max": 10, "def": 3, "unit": "ms", "prec": 1, "hint": "The shortest delay of the sweep." },
+    { "key": "feedback", "label": "Feedback", "min": -0.9, "max": 0.9, "def": 0.5 },
+    { "key": "mix", "label": "Mix", "min": 0, "max": 1, "def": 0.5 }
+  ],
+  "graph": {
+    "nodes": {
+      "dly": { "type": "delay", "maxDelay": 0.05 },
+      "fb": { "type": "gain" },
+      "lfo": { "type": "osc", "wave": "sine" },
+      "amt": { "type": "gain" },
+      "dry": { "type": "gain" },
+      "wet": { "type": "gain" }
+    },
+    "connect": [
+      ["in", "dry", "out"],
+      ["in", "dly", "wet", "out"],
+      ["dly", "fb", "dly"],
+      ["lfo", "amt", "dly.delayTime"]
+    ],
+    "bind": [
+      { "param": "rate", "to": "lfo.frequency" },
+      { "to": "dly.delayTime", "map": "(manual + depth * 3.5) / 1000" },
+      { "to": "amt.gain", "map": "depth * 3.5 / 1000" },
+      { "param": "feedback", "to": "fb.gain" },
+      { "param": "mix", "to": "wet.gain" },
+      { "param": "mix", "to": "dry.gain", "map": "1 - x" }
+    ]
+  }
+}

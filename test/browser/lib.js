@@ -149,3 +149,106 @@ export async function renderWith(buffer, fx = [], opts = {}) {
 }
 
 export const fmt = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : String(v));
+
+/* ── live capture ─────────────────────────────────────────────────────── */
+
+const CAPTURE = `
+class TestCapture extends AudioWorkletProcessor {
+  constructor(o) {
+    super();
+    this.start = o.processorOptions.start;
+    this.n = o.processorOptions.frames;
+    this.L = new Float32Array(this.n);
+    this.R = new Float32Array(this.n);
+    this.w = 0;
+  }
+  process(inputs) {
+    const inp = inputs[0];
+    if (this.w < this.n) {
+      const l = inp[0], r = inp[1] ?? inp[0];
+      for (let i = 0; i < 128 && this.w < this.n; i++) {
+        if (currentFrame + i < this.start) continue;
+        this.L[this.w] = l ? l[i] : 0;
+        this.R[this.w] = r ? r[i] : 0;
+        this.w++;
+      }
+      if (this.w >= this.n) this.port.postMessage({ L: this.L, R: this.R });
+    }
+    return true;
+  }
+}
+registerProcessor("test-capture", TestCapture);`;
+
+let liveCtx = null;
+/** One shared real-time context at 48 kHz, with the capture processor loaded. */
+export async function live() {
+  if (!liveCtx) {
+    liveCtx = new AudioContext({ sampleRate: 48000 });
+    await liveCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([CAPTURE], { type: "text/javascript" })));
+  }
+  if (liveCtx.state !== "running") await liveCtx.resume();
+  return liveCtx;
+}
+
+/**
+ * Play `buffer` through `fx` in a real-time AudioContext — the same buildChain
+ * the engine uses, in live mode — and capture what comes out, sample-aligned
+ * with the start of the buffer. The counterpart of renderWith for parity checks.
+ */
+export async function liveRender(buffer, fx = [], opts = {}) {
+  await ready();
+  const ctx = await live();
+  const { buildChain, disposeChain } = await import("../../src/audio/effects.js");
+  const { prepareContext } = await import("../../src/plugins/worklets.js").catch(() => ({}));
+  if (prepareContext) await prepareContext(ctx);
+  const defs = fx.map((f) => {
+    const def = newEffect(f.type);
+    Object.assign(def.params, f.params ?? {});
+    return def;
+  });
+  const input = ctx.createGain();
+  const output = ctx.createGain();
+  const chain = buildChain(ctx, defs, input, output, false);
+  const frames = Math.round((buffer.duration + (opts.tailSec ?? 0)) * ctx.sampleRate);
+  // Long enough for the 20 ms parameter ramps a live build starts with to settle.
+  const start = Math.ceil((ctx.currentTime + 0.25) * ctx.sampleRate);
+  const cap = new AudioWorkletNode(ctx, "test-capture", {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    channelCount: 2,
+    channelCountMode: "explicit",
+    processorOptions: { start, frames },
+  });
+  const mute = ctx.createGain();
+  mute.gain.value = 0;
+  output.connect(cap).connect(mute).connect(ctx.destination);
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(input);
+  src.start(start / ctx.sampleRate);
+  // Effects that follow their own envelope on the UI clock get their tick, as
+  // the engine's frame loop would give them.
+  const ticker = setInterval(() => chain.forEach((f) => f.tick?.(1 / 60)), 16);
+  const data = await new Promise((res) => (cap.port.onmessage = (e) => res(e.data)));
+  clearInterval(ticker);
+  disposeChain(chain);
+  src.disconnect();
+  cap.disconnect();
+  mute.disconnect();
+  const out = new AudioBuffer({ numberOfChannels: 2, length: frames, sampleRate: ctx.sampleRate });
+  out.copyToChannel(data.L, 0);
+  out.copyToChannel(data.R, 1);
+  return out;
+}
+
+/** Mean of every sample: a DC offset shows up here and clicks on bypass. */
+export function dcOf(buf) {
+  let s = 0;
+  let n = 0;
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < d.length; i++) s += d[i];
+    n += d.length;
+  }
+  return s / Math.max(1, n);
+}

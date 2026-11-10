@@ -1,0 +1,95 @@
+{
+  "id": "pedal.fuzz",
+  "name": "Fuzz",
+  "category": "Distortion",
+  "description": "Hard clipping around a shifted bias point: the wave crosses zero off-centre, so its two halves have different widths — the source of the splatty even harmonics, and of the sputter as a note decays below the bias.",
+  "params": [
+    {
+      "key": "fuzz",
+      "label": "Fuzz",
+      "min": 2,
+      "max": 300,
+      "def": 60,
+      "log": true,
+      "prec": 0
+    },
+    {
+      "key": "bias",
+      "label": "Bias",
+      "min": 0,
+      "max": 0.8,
+      "def": 0.3,
+      "hint": "Shifts the clipping point off-centre. Higher is more lopsided, and gates quiet playing."
+    },
+    {
+      "key": "tone",
+      "label": "Tone",
+      "min": 800,
+      "max": 10000,
+      "def": 3500,
+      "unit": "Hz",
+      "log": true
+    },
+    {
+      "key": "level",
+      "label": "Level",
+      "min": -36,
+      "max": 6,
+      "def": -20,
+      "unit": "dB"
+    }
+  ],
+  "graph": {
+    "nodes": {
+      "sh": {
+        "type": "shaper",
+        "oversample": "4x",
+        "curve": {
+          "kind": "expr",
+          "size": 4096,
+          "expr": "(clamp(fuzz * (x - bias * 0.1), 0 - 1, 1) + clamp(fuzz * bias * 0.1, 0, 1)) / (1 + clamp(fuzz * bias * 0.1, 0, 1))"
+        }
+      },
+      "dc": {
+        "type": "biquad",
+        "filter": "highpass"
+      },
+      "tone": {
+        "type": "biquad",
+        "filter": "lowpass"
+      }
+    },
+    "connect": [
+      [
+        "in",
+        "sh",
+        "dc",
+        "tone",
+        "out"
+      ]
+    ],
+    "bind": [
+      {
+        "to": "dc.frequency",
+        "map": "60"
+      },
+      {
+        "to": "dc.Q",
+        "map": "0 - 3.0103"
+      },
+      {
+        "param": "tone",
+        "to": "tone.frequency"
+      },
+      {
+        "to": "tone.Q",
+        "map": "0 - 3.0103"
+      },
+      {
+        "param": "level",
+        "to": "out.gain",
+        "map": "db2gain(x) * (1 + clamp(fuzz * bias * 0.1, 0, 1))"
+      }
+    ]
+  }
+}

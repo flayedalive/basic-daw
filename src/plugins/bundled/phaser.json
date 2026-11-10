@@ -1,0 +1,62 @@
+{
+  "id": "pedal.phaser",
+  "name": "Phaser",
+  "category": "Modulation",
+  "description": "Four or six all-pass stages swept together by an LFO and mixed against the dry signal, which is what carves the moving notches.",
+  "params": [
+    { "key": "rate", "label": "Rate", "min": 0.05, "max": 8, "def": 0.5, "unit": "Hz", "log": true, "prec": 2 },
+    { "key": "depth", "label": "Depth", "min": 0, "max": 1, "def": 0.7 },
+    { "key": "center", "label": "Center", "min": 200, "max": 4000, "def": 800, "unit": "Hz", "log": true },
+    { "key": "reso", "label": "Reso", "min": 0.3, "max": 4, "def": 0.7, "hint": "Sharpness of each stage. Higher makes the notches narrower and the sweep more vocal." },
+    { "key": "six", "label": "6 stages", "bool": true, "def": false },
+    { "key": "mix", "label": "Mix", "min": 0, "max": 1, "def": 0.5 }
+  ],
+  "graph": {
+    "nodes": {
+      "a1": { "type": "biquad", "filter": "allpass" },
+      "a2": { "type": "biquad", "filter": "allpass" },
+      "a3": { "type": "biquad", "filter": "allpass" },
+      "a4": { "type": "biquad", "filter": "allpass" },
+      "a5": { "type": "biquad", "filter": "allpass" },
+      "a6": { "type": "biquad", "filter": "allpass" },
+      "lfo": { "type": "osc", "wave": "sine" },
+      "amt": { "type": "gain" },
+      "dry": { "type": "gain" },
+      "wet": { "type": "gain" }
+    },
+    "connect": [
+      ["in", "dry", "out"],
+      ["in", "a1", "a2", "a3", "a4"],
+      ["a5", "a6"],
+      { "from": "a4", "to": "wet", "when": "1 - six" },
+      { "from": "a4", "to": "a5", "when": "six" },
+      { "from": "a6", "to": "wet", "when": "six" },
+      ["wet", "out"],
+      ["lfo", "amt"],
+      ["amt", "a1.detune"],
+      ["amt", "a2.detune"],
+      ["amt", "a3.detune"],
+      ["amt", "a4.detune"],
+      ["amt", "a5.detune"],
+      ["amt", "a6.detune"]
+    ],
+    "bind": [
+      { "param": "rate", "to": "lfo.frequency" },
+      { "param": "depth", "to": "amt.gain", "map": "x * 2400" },
+      { "param": "center", "to": "a1.frequency" },
+      { "param": "center", "to": "a2.frequency" },
+      { "param": "center", "to": "a3.frequency" },
+      { "param": "center", "to": "a4.frequency" },
+      { "param": "center", "to": "a5.frequency" },
+      { "param": "center", "to": "a6.frequency" },
+      { "param": "reso", "to": "a1.Q" },
+      { "param": "reso", "to": "a2.Q" },
+      { "param": "reso", "to": "a3.Q" },
+      { "param": "reso", "to": "a4.Q" },
+      { "param": "reso", "to": "a5.Q" },
+      { "param": "reso", "to": "a6.Q" },
+      { "param": "mix", "to": "wet.gain" },
+      { "param": "mix", "to": "dry.gain", "map": "1 - x" }
+    ]
+  }
+}
