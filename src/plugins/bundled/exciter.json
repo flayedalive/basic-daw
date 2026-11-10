@@ -1,0 +1,102 @@
+{
+  "id": "json.exciter",
+  "name": "Harmonic Exciter",
+  "category": "EQ / Filter",
+  "description": "Adds new high harmonics rather than boosting the ones already there: the band above Frequency is driven through an asymmetric shaper and a little of the result is mixed back over the untouched signal.",
+  "params": [
+    {
+      "key": "freq",
+      "label": "Frequency",
+      "min": 2000,
+      "max": 8000,
+      "def": 4000,
+      "unit": "Hz",
+      "log": true
+    },
+    {
+      "key": "drive",
+      "label": "Drive",
+      "min": 1,
+      "max": 20,
+      "def": 4,
+      "log": true,
+      "prec": 1
+    },
+    {
+      "key": "mix",
+      "label": "Mix",
+      "min": 0,
+      "max": 1,
+      "def": 0.25
+    }
+  ],
+  "graph": {
+    "nodes": {
+      "hp": {
+        "type": "biquad",
+        "filter": "highpass"
+      },
+      "pre": {
+        "type": "gain"
+      },
+      "sh": {
+        "type": "shaper",
+        "oversample": "4x",
+        "curve": {
+          "kind": "expr",
+          "size": 4096,
+          "expr": "(tanh(3 * x + 0.6) - tanh(0.6)) / (tanh(3.6) - tanh(0.6))"
+        }
+      },
+      "post": {
+        "type": "biquad",
+        "filter": "highpass"
+      },
+      "wet": {
+        "type": "gain"
+      }
+    },
+    "connect": [
+      [
+        "in",
+        "out"
+      ],
+      [
+        "in",
+        "hp",
+        "pre",
+        "sh",
+        "post",
+        "wet",
+        "out"
+      ]
+    ],
+    "bind": [
+      {
+        "param": "freq",
+        "to": "hp.frequency"
+      },
+      {
+        "to": "hp.Q",
+        "map": "0 - 3.0103"
+      },
+      {
+        "param": "freq",
+        "to": "post.frequency"
+      },
+      {
+        "to": "post.Q",
+        "map": "0 - 3.0103"
+      },
+      {
+        "param": "drive",
+        "to": "pre.gain"
+      },
+      {
+        "param": "mix",
+        "to": "wet.gain",
+        "map": "x * 0.5"
+      }
+    ]
+  }
+}

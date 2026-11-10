@@ -12,6 +12,7 @@ const FILES = [
   "tremolo", "autowah", "bitcrusher", "tube", "wavefolder", "plate", "tilt", "haas", "pingpong",
   // the pedal pack
   "overdrive", "distortion", "fuzz", "boost", "phaser", "flanger", "octaveup",
+  "geq10", "exciter",
 ];
 
 /** Fetch every bundled manifest. Returns { manifests, errors }. */
