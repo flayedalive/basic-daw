@@ -63,3 +63,34 @@ test("in the app: the panel shows a playing tone and an out-of-phase mix", async
   assert(!win.__errors.length, win.__errors.join("; "));
   return `peak at ${fmt(hz, 0)} Hz (${fmt(Math.max(...cols), 0)} dB), correlation ${fmt(st.corr)}`;
 });
+
+test("in the app: the live loudness readout agrees with the bounce's report", async () => {
+  const win = await openApp();
+  const { daw } = win;
+  daw.engine.ensure();
+  await daw.engine.ctx.resume();
+  const rate = daw.engine.sampleRate;
+  const a = Math.pow(10, -20 / 20);
+  const asset = await daw.pool.addAsset({ name: "tone", buffer: makeBuffer(rate, 6, (t) => a * Math.sin(2 * Math.PI * 1000 * t)) });
+  daw.timeline.dropAssetAt(asset.id, daw.state.project.tracks[0].id, 0);
+  Object.assign(daw.state.project.clips[0], { fadeIn: 0, fadeOut: 0 });
+  for (let i = 0; i < 100 && !daw.engine.master.loudnessNode; i++) await sleep(30);
+  assert(daw.engine.master.loudnessNode, "the loudness meter never attached");
+  daw.engine.play(0);
+  await sleep(4500);
+  const { analyzerState } = await win.eval('import("/src/ui/analyzer.js")');
+  const shown = analyzerState().loudness;
+  const live = { ...daw.engine.loudness };
+  daw.engine.stop();
+  const { measureBuffer } = await win.eval('import("/src/audio/loudness.js")');
+  const ref = measureBuffer(await daw.render.renderRange(0, 4, { sampleRate: rate, tailSec: 0 }));
+  assert(Math.abs(live.integrated - ref.integrated) < 0.2, `live ${fmt(live.integrated)} vs bounce ${fmt(ref.integrated)} LUFS`);
+  assert(Math.abs(live.truePeak - ref.truePeakDb) < 0.2, `true peak ${fmt(live.truePeak)} vs ${fmt(ref.truePeakDb)}`);
+  assert(Math.abs(Number(shown.integrated) - live.integrated) < 0.2 && shown.truePeak !== "–", `panel shows ${JSON.stringify(shown)}`);
+  // Pressing play again starts the integration afresh.
+  daw.engine.play(5.5);
+  await sleep(300);
+  daw.engine.stop();
+  assert(!win.__errors.length, win.__errors.join("; "));
+  return `live ${fmt(live.integrated, 1)} LUFS / ${fmt(live.truePeak, 1)} dBTP; bounce ${fmt(ref.integrated, 1)} / ${fmt(ref.truePeakDb, 1)}`;
+});

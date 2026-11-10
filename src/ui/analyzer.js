@@ -95,7 +95,18 @@ export function analyzerPanel() {
     textContent: "tilt",
   });
   tiltBtn.classList.toggle("on", prefs.tilt);
-  const body = el("div.an-body", null, canvas, el("div.an-row", null, el("span.an-lab", null, "-1"), corrBar, el("span.an-lab", null, "+1"), corrVal));
+  // Loudness since play was last pressed (ITU-R BS.1770). Click to start it again.
+  const lu = {};
+  const cell = (key, label, title) => el("span.an-lu", { title }, el("span.an-lab", null, label), (lu[key] = el("b", null, "–")));
+  const loud = el(
+    "div.an-row.an-loud",
+    { title: "Click to reset", onclick: () => engine.resetLoudness() },
+    cell("momentary", "M", "Momentary loudness (400 ms), LUFS"),
+    cell("shortTerm", "S", "Short-term loudness (3 s), LUFS"),
+    cell("integrated", "I", "Integrated loudness since play was pressed, LUFS"),
+    cell("truePeak", "TP", "True peak since play was pressed, dBTP"),
+  );
+  const body = el("div.an-body", null, canvas, el("div.an-row", null, el("span.an-lab", null, "-1"), corrBar, el("span.an-lab", null, "+1"), corrVal), loud);
   const toggle = el("button.mini", {
     title: "Show / hide the analyzer",
     onclick: () => {
@@ -112,7 +123,7 @@ export function analyzerPanel() {
   };
   apply();
 
-  panel = { root, canvas, corrFill, corrVal, prefs, cols: null, shown: null, corr: 0, freq: null };
+  panel = { root, canvas, corrFill, corrVal, lu, prefs, cols: null, shown: null, corr: 0, freq: null };
   return root;
 }
 
@@ -187,6 +198,15 @@ export function updateAnalyzer() {
   c.lineWidth = 1;
   c.stroke();
 
+  const report = engine.loudness;
+  if (report) {
+    for (const key of ["momentary", "shortTerm", "integrated", "truePeak"]) {
+      const v = report[key];
+      p.lu[key].textContent = Number.isFinite(v) ? v.toFixed(1) : "–";
+    }
+    p.lu.truePeak.style.color = report.truePeak > 0 ? "#e5484d" : "";
+  }
+
   // Correlation, from the time-domain blocks the engine has just read for the meters.
   const k = correlation(m.bufL, m.bufR);
   if (k === null) {
@@ -203,4 +223,5 @@ export function updateAnalyzer() {
 }
 
 /** What the panel is showing right now, for tests and the console. */
-export const analyzerState = () => (panel ? { open: panel.prefs.open, tilt: panel.prefs.tilt, corr: panel.corr, columns: panel.shown } : null);
+export const analyzerState = () =>
+  panel ? { open: panel.prefs.open, tilt: panel.prefs.tilt, corr: panel.corr, columns: panel.shown, loudness: Object.fromEntries(Object.entries(panel.lu).map(([k, e]) => [k, e.textContent])) } : null;

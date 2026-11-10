@@ -17,17 +17,22 @@ import { assets, state, trackAudible, beatSeconds } from "../state.js";
 import { buildChain, disposeChain } from "./effects.js";
 import { playbackOf } from "./clipaudio.js";
 import { signatureOf, chainLatency } from "../plugins/registry.js";
-import { prepareContext, contextReady } from "../plugins/worklets.js";
+import { prepareContext, contextReady, registerWorklets } from "../plugins/worklets.js";
 
 const LOOKAHEAD = 0.35; // seconds of audio scheduled ahead of the clock
 const TICK_MS = 40;
 const CHUNK = 0.5; // max timeline seconds scheduled per pass
 const MAX_COMPENSATION = 2; // seconds of plugin latency a track can be held back by
 
+// The master's live loudness meter (LUFS, true peak). Not a plugin — it only
+// listens — but its processor is loaded the same way theirs are.
+const [LOUDNESS_METER] = registerWorklets([{ name: "daw-loudness", url: new URL("../plugins/worklets/loudness-meter.js", import.meta.url).href }]);
+
 class Engine {
   constructor() {
     this.ctx = null;
     this.latency = { tracks: 0, master: 0, total: 0 };
+    this.loudness = null; // latest report from the master's loudness meter
     this.playing = false;
     this.recording = false;
     this.tracks = new Map(); // trackId -> node bundle
@@ -71,14 +76,37 @@ class Engine {
    */
   loadWorklets() {
     const ctx = this.ctx;
-    if (!ctx || contextReady(ctx)) return;
+    if (!ctx) return;
+    if (contextReady(ctx)) return this.attachLoudnessMeter();
     prepareContext(ctx).then(
       () => {
         const pending = (live) => live.some((fx) => fx.pending);
         if (pending(this.master.fxLive) || [...this.tracks.values()].some((b) => pending(b.fxLive))) this.rebuildAllChains();
+        this.attachLoudnessMeter();
       },
       (err) => console.warn(err.message),
     );
+  }
+
+  /**
+   * Hang the loudness meter off the master output. It posts momentary,
+   * short-term and integrated LUFS and true peak ten times a second; the
+   * latest is kept in `this.loudness` for the analyzer panel. Display only.
+   */
+  attachLoudnessMeter() {
+    const m = this.master;
+    if (!m || m.loudnessNode || !contextReady(this.ctx, [LOUDNESS_METER])) return;
+    const node = new AudioWorkletNode(this.ctx, LOUDNESS_METER.name, { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 2, channelCountMode: "explicit" });
+    const mute = this.ctx.createGain();
+    mute.gain.value = 0; // a node has to lead somewhere to be run at all
+    m.gain.connect(node).connect(mute).connect(this.ctx.destination);
+    node.port.onmessage = (e) => (this.loudness = e.data);
+    m.loudnessNode = node;
+  }
+
+  /** Start the integrated loudness and the true-peak hold again. */
+  resetLoudness() {
+    this.master?.loudnessNode?.port.postMessage("reset");
   }
 
   buildMaster() {
@@ -294,6 +322,7 @@ class Engine {
     this.segments = [makeSegment(start, pos, looping ? loop.end : Infinity)];
     this.recLog?.push(this.segments[0]);
     this.playStart = pos;
+    this.resetLoudness(); // "integrated" means: since you last pressed play
     this.sched = { pos, ctxTime: start, segIndex: 0, straddle: true, lastBeat: -1 };
     this.playing = true;
     this.tick();
