@@ -22,7 +22,7 @@ import { tunerPlugin } from "./tuner.js";
 import { ampPlugin, cabPlugin } from "./amp.js";
 import { geq31Plugin } from "./geq31.js";
 import { multibandPlugin } from "./multiband.js";
-import { gatePlugin, limiterPlugin } from "./dynamics.js";
+import { gatePlugin, limiterPlugin, busCompPlugin, deEsserPlugin } from "./dynamics.js";
 
 const P = (key, label, min, max, def, extra = {}) => ({ key, label, min, max, def, ...extra });
 
@@ -458,4 +458,6 @@ export function registerBuiltins() {
   // Worklet plugins: their sound follows the signal, which native nodes cannot do.
   add(gatePlugin);
   add(limiterPlugin);
+  add(busCompPlugin);
+  add(deEsserPlugin);
 }

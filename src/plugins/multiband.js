@@ -1,4 +1,4 @@
-// Three-band compressor on native nodes.
+// Three-band compressor.
 //
 // Crossovers are 4th-order Linkwitz–Riley: two Butterworth biquads in series
 // per slope. (Web Audio's lowpass/highpass Q is in dB, so Butterworth is
@@ -7,28 +7,19 @@
 // the mid and high bands have been through that crossover's phase shift and
 // the low band has not, and without the all-pass the three would not sum flat.
 //
-// Each band has a DynamicsCompressorNode, which brings two quirks:
-//
-//  - It applies its own makeup gain, even to signal far below the threshold,
-//    and offers no way to turn that off. With the knee held at 0 the amount is
-//    a closed form — (-threshold × (1 - 1/ratio)) × 0.6 dB — so it is cancelled
-//    here and each band's Gain knob means what it says. (The 0.6 exponent is
-//    the same in Chromium, WebKit and Gecko, which share the implementation;
-//    test 26 measures it rather than trusting this comment.)
-//  - It delays the signal by 6 ms of look-ahead. Every band has one, so they
-//    still line up with each other.
-//
-// Phase 4 replaces the native compressors with a worklet that needs neither
-// workaround (handoff plan item 4.4).
+// Each band is compressed by the worklet compressor (worklets/compressor.js,
+// the one behind the Bus Compressor). It is exactly unity at ratio 1 and adds
+// no delay, so the bands sum flat at idle with nothing to cancel. The first
+// version of this plugin used a DynamicsCompressorNode per band and had to
+// work around two of its quirks — a hidden makeup gain and 6 ms of look-ahead.
 
 import { dbToGain } from "../util.js";
 import { setAudioParam } from "./dsp.js";
+import { workletNode } from "./worklets.js";
+import { COMPRESSOR_WORKLET } from "./dynamics.js";
 
 const BUTTERWORTH = -3.0103;
 const P = (key, label, min, max, def, extra = {}) => ({ key, label, min, max, def, ...extra });
-
-/** The makeup gain (dB) a hard-knee DynamicsCompressorNode adds on its own. */
-export const nativeMakeupDb = (threshold, ratio) => -threshold * (1 - 1 / Math.max(1, ratio)) * 0.6;
 
 const band = (id, name, thresh) => [
   P(`${id}Thresh`, `${name} thresh`, -60, 0, thresh, { unit: "dB" }),
@@ -41,9 +32,8 @@ export const multibandPlugin = {
   name: "Multiband Compressor",
   category: "Dynamics",
   description:
-    "Three bands, each with its own compressor, split by crossovers that sum flat. With every ratio at 1:1 it is transparent. Its 6 ms of look-ahead is compensated.",
-  // The native compressors' look-ahead; the engine and the bounce compensate.
-  latency: 0.006,
+    "Three bands, each with its own compressor, split by crossovers that sum flat. With every ratio at 1:1 only the crossovers' phase shift remains.",
+  worklets: [COMPRESSOR_WORKLET],
   params: [
     P("xLow", "Low / mid", 60, 1000, 200, { unit: "Hz", log: true }),
     P("xHigh", "Mid / high", 1000, 10000, 2500, { unit: "Hz", log: true }),
@@ -71,11 +61,9 @@ export const multibandPlugin = {
     const restHp = [bq("highpass"), bq("highpass")];
     const midLp = [bq("lowpass"), bq("lowpass")];
     const highHp = [bq("highpass"), bq("highpass")];
-    const comps = [0, 1, 2].map(() => {
-      const c = ctx.createDynamicsCompressor();
-      c.knee.value = 0; // keeps the built-in makeup gain a closed form — see the header
-      return c;
-    });
+    const comps = [0, 1, 2].map(() => workletNode(ctx, COMPRESSOR_WORKLET.name));
+    const reduction = [0, 0, 0];
+    comps.forEach((c, i) => (c.port.onmessage = (e) => (reduction[i] = e.data)));
     const gains = [0, 1, 2].map(() => ctx.createGain());
 
     input.connect(lowLp[0]).connect(lowLp[1]).connect(lowAp).connect(comps[0]);
@@ -97,19 +85,23 @@ export const multibandPlugin = {
         for (const f of f1) set(f.frequency, lo);
         for (const f of f2) set(f.frequency, p.xHigh);
         ids.forEach((id, i) => {
-          const thr = p[`${id}Thresh`];
-          const ratio = p[`${id}Ratio`];
-          set(comps[i].threshold, thr);
-          set(comps[i].ratio, ratio);
-          set(comps[i].attack, p.attack);
-          set(comps[i].release, p.release);
-          set(gains[i].gain, dbToGain(p[`${id}Gain`] - nativeMakeupDb(thr, ratio)));
+          const q = comps[i].parameters;
+          set(q.get("threshold"), p[`${id}Thresh`]);
+          set(q.get("ratio"), p[`${id}Ratio`]);
+          set(q.get("attack"), p.attack);
+          set(q.get("release"), p.release);
+          set(q.get("knee"), 6);
+          set(q.get("rms"), 1);
+          set(gains[i].gain, dbToGain(p[`${id}Gain`]));
         });
       },
       /** Gain reduction of whichever band is working hardest, in dB (≤ 0). */
-      readout: () => Math.min(comps[0].reduction, comps[1].reduction, comps[2].reduction),
+      readout: () => Math.min(...reduction),
       /** Per-band reduction, for a custom view. */
-      reductions: () => comps.map((c) => c.reduction),
+      reductions: () => [...reduction],
+      dispose() {
+        for (const c of comps) c.port.onmessage = null;
+      },
     };
   },
 };

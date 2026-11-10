@@ -62,9 +62,10 @@ Everything runs client-side, so nothing you import ever leaves your machine.
   value (`-12`, `+3.5`, `-inf`, `L30`, `C`); Alt-click resets
 - CLIP lights on every strip and the master latch when a level reaches
   0 dBFS; click to clear
-- Insert chains on every track and the master, thirty-five effects out of the box:
+- Insert chains on every track and the master, thirty-seven effects out of the box:
   4-band EQ (with a live response curve), 10- and 31-band graphic EQs, tilt EQ,
-  filter, auto-wah, compressor, 3-band multiband compressor,
+  filter, auto-wah, compressor, bus compressor (sidechain high-pass, parallel
+  mix), 3-band multiband compressor, de-esser / dynamic EQ,
   true-peak limiter, clipper, noise gate, delay, ping-pong echo, reverb, plate reverb, chorus,
   tremolo, saturator, tube warmth, harmonic exciter, bit crusher, wavefolder, stereo width, Haas
   widener, trim, tuner
@@ -106,7 +107,8 @@ Everything runs client-side, so nothing you import ever leaves your machine.
 - Bounce the master, the loop region, or the selection to 16/24-bit or 32-bit
   float WAV at 44.1 / 48 / 96 kHz, with an optional tail and peak normalize
 - A spectrum analyzer and stereo correlation meter beside the master strip
-  (log frequency, optional 4.5 dB/octave tilt)
+  (log frequency, optional 4.5 dB/octave tilt), with a live loudness readout:
+  momentary, short-term and integrated LUFS, and true peak
 - Every bounce ends with a loudness report — integrated LUFS, short-term max,
   loudness range, true peak, PLR (ITU-R BS.1770 / EBU R 128) — and can be
   normalized to a LUFS target instead of to peak, held under -1 dBTP
@@ -167,7 +169,7 @@ src/
     geq31.js          31-band graphic EQ
     multiband.js      3-band compressor on Linkwitz–Riley crossovers
     worklets.js       loads plugins' AudioWorklet modules into each context
-    dynamics.js       worklet plugins (noise gate, true-peak limiter)
+    dynamics.js       worklet plugins (gate, true-peak limiter, bus compressor, de-esser)
     worklets/         their AudioWorklet processors
     tuner.js          the tuner insert (registered with the built-ins)
     pitch.js          YIN pitch detection and note naming, DOM-free

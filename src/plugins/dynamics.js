@@ -93,3 +93,69 @@ export const limiterPlugin = {
     }));
   },
 };
+
+export const COMPRESSOR_WORKLET = { name: "daw-compressor", url: moduleUrl("compressor.js") };
+
+export const busCompPlugin = {
+  id: "core.buscomp",
+  name: "Bus Compressor",
+  category: "Dynamics",
+  description:
+    "Glue for a bus or the master: soft knee, a sidechain high-pass so the bass does not pump the mix, an auto-release that holds dense passages steady, and a mix knob for parallel compression. Adds no delay.",
+  worklets: [COMPRESSOR_WORKLET],
+  params: [
+    P("threshold", "Thresh", -40, 0, -18, { unit: "dB", prec: 1 }),
+    P("ratio", "Ratio", 1, 20, 4, { unit: ":1", prec: 1, log: true }),
+    P("knee", "Knee", 0, 24, 6, { unit: "dB", prec: 1 }),
+    P("attack", "Attack", 0.1, 100, 10, { unit: "ms", prec: 1, log: true }),
+    P("release", "Release", 20, 2000, 200, { unit: "ms", prec: 0, log: true }),
+    { key: "auto", label: "Auto release", bool: true, def: false, hint: "Release slows down while compression is sustained, so dense passages do not pump." },
+    { key: "detector", label: "Detector", choices: ["rms", "peak"], def: "rms" },
+    P("scHpf", "SC high-pass", 20, 500, 80, { unit: "Hz", log: true, hint: "Filters the lows out of what the compressor listens to (not out of the sound). 20 Hz is off." }),
+    P("makeup", "Makeup", 0, 24, 0, { unit: "dB", prec: 1 }),
+    P("mix", "Mix", 0, 1, 1, { hint: "Blend the compressed signal with the untouched one: parallel compression." }),
+  ],
+  create(ctx, offline) {
+    return workletFx(ctx, offline, "daw-compressor", (p) => ({
+      threshold: p.threshold,
+      ratio: p.ratio,
+      knee: p.knee,
+      attack: p.attack / 1000,
+      release: p.release / 1000,
+      auto: p.auto ? 1 : 0,
+      rms: p.detector === "peak" ? 0 : 1,
+      scHpf: p.scHpf,
+      makeup: p.makeup,
+      mix: p.mix,
+    }));
+  },
+};
+
+export const deEsserPlugin = {
+  id: "core.deesser",
+  name: "De-esser / Dynamic EQ",
+  category: "Dynamics",
+  description:
+    "Cuts one band only while it is too loud. Aim it at 5–8 kHz to tame sibilance, or lower to catch a boomy note. Listen plays the band on its own so you can find the frequency.",
+  worklets: [{ name: "daw-dyneq", url: moduleUrl("dyneq.js") }],
+  params: [
+    P("frequency", "Frequency", 200, 16000, 6500, { unit: "Hz", log: true }),
+    P("q", "Width", 0.5, 8, 2, { prec: 1, hint: "Q of the band. Higher is narrower." }),
+    P("threshold", "Thresh", -60, 0, -30, { unit: "dB", prec: 1, hint: "Level of the band itself above which it is cut." }),
+    P("range", "Range", 0, 24, 10, { unit: "dB", prec: 1, hint: "The most it will cut." }),
+    P("attack", "Attack", 0.1, 20, 1, { unit: "ms", prec: 1, log: true }),
+    P("release", "Release", 10, 500, 80, { unit: "ms", prec: 0, log: true }),
+    { key: "listen", label: "Listen", bool: true, def: false },
+  ],
+  create(ctx, offline) {
+    return workletFx(ctx, offline, "daw-dyneq", (p) => ({
+      frequency: p.frequency,
+      q: p.q,
+      threshold: p.threshold,
+      range: p.range,
+      attack: p.attack / 1000,
+      release: p.release / 1000,
+      listen: p.listen ? 1 : 0,
+    }));
+  },
+};

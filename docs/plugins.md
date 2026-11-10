@@ -350,7 +350,7 @@ export default {
 | `update(params)` | yes | Called on every parameter change. Must be cheap and click-free. |
 | `dispose()` | no | Stop oscillators and constant sources here, or they leak. |
 | `tick(dt)` | no | Called once per UI frame with seconds elapsed. Live playback only — an offline render never calls it, so anything essential to the sound must not live here. Measurement is the safe use: the Tuner detects pitch here because nothing it learns changes the audio. |
-| `readout()` | no | A number for the inspector to display, such as gain reduction. |
+| `readout()` | no | Gain reduction in dB (0 or negative). Plugins in the Dynamics category get a reduction meter in their editor that reads this every frame. |
 
 Declare `rebuildOn: ["someKey"]` if a parameter changes the graph's shape.
 

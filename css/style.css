@@ -679,6 +679,24 @@ input[type="number"]::-webkit-inner-spin-button {
   background: #191c26;
   border-color: var(--border-lt);
 }
+/* Gain-reduction meter in a dynamics plugin's editor: fills right-to-left, 24 dB wide. */
+.gr-meter {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  background: #0d0f14;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.gr-meter i {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: #e0a13c;
+}
+
 /* Master analyzer: spectrum + stereo correlation, to the right of the master strip. */
 .strip.analyzer {
   width: 300px;
@@ -732,6 +750,16 @@ input[type="number"]::-webkit-inner-spin-button {
 .an-row .val {
   width: 34px;
   text-align: right;
+}
+.an-loud {
+  justify-content: space-between;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.an-lu b {
+  margin-left: 3px;
+  font-weight: 500;
+  color: var(--fg);
 }
 .an-corr {
   position: relative;

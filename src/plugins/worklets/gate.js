@@ -86,11 +86,11 @@ class GateProcessor extends AudioWorkletProcessor {
     this.open = open;
     this.holdLeft = holdLeft;
 
-    // Metering only: how open the gate is, for the inspector.
+    // Metering only: how far the gate is turning the signal down, in dB (<= 0).
     this.sinceMeter += n;
     if (this.sinceMeter >= 2048) {
       this.sinceMeter = 0;
-      this.port.postMessage(gain);
+      this.port.postMessage(gain > 1e-4 ? 20 * Math.log10(gain) : -80);
     }
     return true;
   }

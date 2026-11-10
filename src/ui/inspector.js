@@ -761,6 +761,7 @@ function renderFx() {
     requestAnimationFrame(() => paintResponse(canvas, def));
   }
   if (kind === "core.tuner") parts.push(tunerDisplay(mode.ownerId, def.id));
+  if (plugin.category === "Dynamics") parts.push(reductionMeter(mode.ownerId, def.id));
   body.append(section(plugin.name, ...parts, ...custom, ...rows));
 }
 
@@ -801,6 +802,30 @@ function renderMissingFx(owner, def) {
       ),
     ),
   );
+}
+
+/**
+ * Gain-reduction meter for a dynamics plugin: whatever its live instance's
+ * `readout()` reports, in dB (0 = not working, negative = turning down).
+ * Reads the engine's instance each frame, so it survives chain rebuilds, and
+ * stops by itself when the panel is re-rendered.
+ */
+function reductionMeter(ownerId, fxId) {
+  const fill = el("i");
+  const val = el("span.val", null, "0.0 dB");
+  const root = el("div.prow", { title: "Gain reduction" }, el("label", null, "Reduction"), el("div.gr-meter", null, fill), val);
+  let shown = 0;
+  const frame = () => {
+    if (!root.isConnected) return;
+    const db = engine.liveEffect(ownerId, fxId)?.readout?.();
+    const target = Number.isFinite(db) ? Math.min(0, db) : 0;
+    shown = target < shown ? target : shown + (target - shown) * 0.15; // fast down, slow back
+    fill.style.width = `${clamp(-shown / 24, 0, 1) * 100}%`;
+    val.textContent = `${shown.toFixed(1)} dB`;
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(() => requestAnimationFrame(frame));
+  return root;
 }
 
 /**

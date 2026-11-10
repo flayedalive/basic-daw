@@ -77,3 +77,24 @@ test("31-band graphic EQ: dragging the bank sets bands, in one undo step", async
   assert(Object.entries(after.params).every(([k, v]) => k === "out" || v === 0), "one undo should restore the whole gesture");
   assert(!win.__errors.length, win.__errors.join("; "));
 });
+
+test("dynamics editors: bus compressor shows its controls and a moving reduction meter", async () => {
+  const { daw, track, fx } = await showFx("core.buscomp");
+  Object.assign(fx.params, { threshold: -40, ratio: 10 });
+  daw.engine.updateMix();
+  for (let i = 0; i < 100 && daw.engine.liveEffect(track.id, fx.id)?.pending; i++) await sleep(30);
+  const meter = $("#insp-body .gr-meter i");
+  assert(meter, "no reduction meter");
+  assert($$("#insp-body select").some((s) => [...s.options].some((o) => o.value === "peak")), "no detector choice");
+  await daw.engine.ctx.resume();
+  daw.engine.play(0);
+  await sleep(700);
+  const live = daw.engine.liveEffect(track.id, fx.id);
+  const reading = live.readout();
+  const width = parseFloat(meter.style.width);
+  daw.engine.stop();
+  assert(reading < -3, `readout ${reading} dB while compressing hard`);
+  assert(width > 5, `meter bar at ${width}%`);
+  assert(!win.__errors.length, win.__errors.join("; "));
+  return `reduction ${reading.toFixed(1)} dB, bar ${width.toFixed(0)}%`;
+});
