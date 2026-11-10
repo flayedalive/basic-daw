@@ -931,6 +931,7 @@ function clipMenu(clip, t) {
     { label: "Loop over clip", onClick: () => setLoopToSelection() },
     { label: "Move to playhead", onClick: () => moveSelectionTo(state.playhead) },
     { label: "Rename…", onClick: () => renameClip(clip) },
+    { label: "Edit pitch…", onClick: async () => (await import("./pitcheditor.js")).openPitchEditor(clip) },
     "-",
     { label: "Delete", sc: "⌫", onClick: () => deleteSelection() },
   ];

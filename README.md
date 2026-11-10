@@ -54,6 +54,11 @@ Everything runs client-side, so nothing you import ever leaves your machine.
   Four modes — one voice (WSOLA), chords and mixes (phase vocoder with
   transients preserved), drums (slices moved, hits untouched), or auto
 - "Match tempo" stretches a clip to a whole number of bars
+- Pitch editor for a sung or played line ("Edit pitch…" on a clip): the notes on
+  a piano-roll grid, corrected to a key and scale or dragged where you want
+  them, with amount, speed, variance, vibrato and transition set for the whole
+  clip or note by note. Split and join notes, audition, apply — the original
+  audio is kept, so the edit can be reopened or reverted at any time
 - Normalize gain from the analysed source peak
 
 **Mixer**
@@ -156,6 +161,12 @@ src/
     resample.js       windowed-sinc sample-rate conversion
     stretch.js        time stretch / pitch shift: WSOLA, phase vocoder, drum slicing
     clipaudio.js      what a clip plays: its asset, or a cached stretched copy
+    pitchtrack.js     pitch over time for one voice (YIN, refined to a fraction of a cent)
+    pitchshift.js     TD-PSOLA: pitch and time for one voice, formants kept
+    pitchnotes.js     a pitch track cut into notes
+    pitchcorrect.js   keys, scales, and the corrected pitch curve for an edit
+    slices.js         run long DSP in time slices so the page stays responsive
+    pitchedit.js      pitch editing as the app sees it: analyse, render, swap, revert
     peaks.js          min/max peak pyramid + waveform drawing
     wav.js            WAV encode, and a decoder for what browsers reject
   plugins/
@@ -181,6 +192,7 @@ src/
     tracks.js         track headers
     mixer.js          strips, inserts, meters
     inspector.js      clip / track / master / effect editors
+    pitcheditor.js    the pitch editor dialog
     pool.js           sample browser
     transport.js      toolbar and readouts
     controls.js       knob, fader, slider row, meter widgets
@@ -255,6 +267,10 @@ There is a `/daw-plugin` skill that walks an agent through designing one to spec
 - Stretch quality is good within about 0.8–1.25× and degrades beyond it; the
   mono mode moves formants with a pitch shift (a vocal shifted far sounds
   chipmunked)
+- The pitch editor is for one voice or instrument at a time, and for
+  corrections within about two semitones. It will not separate chords, and a
+  large shift changes the character of the voice. Editing a clip's pitch
+  renders a second copy of its audio into the pool
 - Overlapping clips on one track both play; no automatic crossfade.
 - No parameter automation lanes yet — mixer moves are static per session.
 - Recording sets the loop aside: a take runs linearly from where it started,

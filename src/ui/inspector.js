@@ -287,6 +287,7 @@ function renderClip() {
         btn("Duplicate", async () => (await import("./timeline.js")).duplicateSelection()),
         btn("Loop over", async () => (await import("./timeline.js")).setLoopToSelection()),
         btn("Normalize gain", () => normalizeClipGain()),
+        btn("Edit pitch…", async () => (await import("./pitcheditor.js")).openPitchEditor(clip)),
         btn("Delete", async () => (await import("./timeline.js")).deleteSelection(), true),
       ),
     ),

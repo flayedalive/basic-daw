@@ -5,6 +5,7 @@ import { assets, bus, state, changed, pushUndo } from "../state.js";
 import { importFiles, removeAsset, assetFromBuffer } from "../assets.js";
 import { engine } from "../audio/engine.js";
 import { fxAssetIds } from "../plugins/registry.js";
+import { pitchSourceIds } from "../audio/pitchedit.js";
 import { quickPeaks } from "../audio/peaks.js";
 import { encodeWav } from "../audio/wav.js";
 import { dropAssetAt } from "./timeline.js";
@@ -67,6 +68,8 @@ function render() {
   const used = new Set(state.project.clips.map((c) => c.assetId));
   // An impulse response loaded into a cabinet is in use though no clip plays it.
   for (const id of fxAssetIds(state.project)) used.add(id);
+  // …and so is the original of a clip whose pitch has been edited: Revert needs it.
+  for (const id of pitchSourceIds(state.project)) used.add(id);
   const items = [...assets.values()].filter((a) => !filter || a.name.toLowerCase().includes(filter));
   items.sort((a, b) => a.name.localeCompare(b.name));
 

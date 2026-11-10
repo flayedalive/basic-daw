@@ -1617,3 +1617,68 @@ input[type="number"]::-webkit-inner-spin-button {
   background: none;
   cursor: pointer;
 }
+
+/* ── pitch editor ───────────────────────────────────────────────────────── */
+.dialog.pitch-dialog {
+  width: min(1100px, 94vw);
+  max-width: 94vw;
+}
+.pe-canvas {
+  width: 100%;
+  height: min(46vh, 420px);
+  min-height: 220px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: default;
+  outline: none;
+  touch-action: none;
+}
+.pe-canvas:focus-visible {
+  border-color: var(--accent);
+}
+.pe-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.pe-controls.pe-sel {
+  min-height: 24px;
+}
+.pe-slider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+.pe-slider input[type="range"] {
+  width: 90px;
+}
+.pe-slider .val {
+  min-width: 44px;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.pe-hint {
+  color: var(--fg-dim);
+}
+.pe-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--fg-dim);
+  flex-shrink: 0;
+}
+.pe-foot .pe-info {
+  color: var(--fg);
+  white-space: nowrap;
+}
+.pe-foot .pe-status {
+  text-align: right;
+}
+.pe-slider .select {
+  width: auto;
+}

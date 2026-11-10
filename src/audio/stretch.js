@@ -30,6 +30,7 @@
 import { fftOf, nextPow2 } from "./fft.js";
 import { resampleTo } from "./resample.js";
 import { detectPitch } from "../plugins/pitch.js";
+import { runToEnd, runSliced } from "./slices.js";
 
 export const STRETCH_MODES = ["auto", "mono", "poly", "drums"];
 export const MIN_RATIO = 0.25;
@@ -572,35 +573,14 @@ export function* stretchGen(channels, sampleRate, opts = {}) {
 }
 
 /** Run a stretch to completion. For Node and for short clips. */
-export function stretch(channels, sampleRate, opts) {
-  const gen = stretchGen(channels, sampleRate, opts);
-  let step = gen.next();
-  while (!step.done) step = gen.next();
-  return step.value;
-}
+export const stretch = (channels, sampleRate, opts) => runToEnd(stretchGen(channels, sampleRate, opts));
 
 /**
  * The same, yielding to the caller's event loop every `budgetMs` so a long
  * stretch does not freeze the page. `pause` resolves when work may resume;
  * `onProgress` hears 0 → 1; `isCancelled` may end it early (resolves null).
  */
-export async function stretchAsync(channels, sampleRate, opts, { budgetMs = 14, pause, onProgress, isCancelled } = {}) {
-  const gen = stretchGen(channels, sampleRate, opts);
-  const wait = pause ?? (() => new Promise((r) => setTimeout(r, 0)));
-  let t0 = Date.now();
-  let step = gen.next();
-  while (!step.done) {
-    if (Date.now() - t0 >= budgetMs) {
-      onProgress?.(step.value);
-      await wait();
-      if (isCancelled?.()) return null;
-      t0 = Date.now();
-    }
-    step = gen.next();
-  }
-  onProgress?.(1);
-  return step.value;
-}
+export const stretchAsync = (channels, sampleRate, opts, run) => runSliced(stretchGen(channels, sampleRate, opts), run);
 
 /** The individual algorithms, for tests and for the pitch editor (Phase 5). */
 export const internals = { wsola, phaseVocoder, drums, mixdown, timeMap, transientMap, bestOffset };

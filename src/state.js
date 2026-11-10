@@ -106,6 +106,12 @@ export function redo() {
   return entry.label;
 }
 
+/** True if any undo or redo step has a clip that plays, or was rendered from, this asset. */
+export function historyUsesAsset(id) {
+  const uses = (entry) => entry.doc.clips?.some((c) => c.assetId === id || c.pitchEdit?.source === id);
+  return undoStack.some(uses) || redoStack.some(uses);
+}
+
 export const historyInfo = () => ({
   canUndo: undoStack.length > 0,
   canRedo: redoStack.length > 0,
