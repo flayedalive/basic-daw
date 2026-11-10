@@ -6,6 +6,7 @@ import { $, toast } from "./util.js";
 import { bus, state } from "./state.js";
 import { engine } from "./audio/engine.js";
 import { initTimeline, draw as drawTimeline, resize as resizeTimeline, zoomToFit } from "./ui/timeline.js";
+import { initScrollbars } from "./ui/scrollbars.js";
 import { initTracks, updateTrackMeters } from "./ui/tracks.js";
 import { initMixer, updateMixerMeters } from "./ui/mixer.js";
 import { initInspector } from "./ui/inspector.js";
@@ -22,6 +23,7 @@ async function boot() {
   await initPlugins();
 
   initTimeline();
+  initScrollbars();
   initTracks();
   initMixer();
   initInspector();

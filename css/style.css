@@ -1424,3 +1424,90 @@ input[type="number"]::-webkit-inner-spin-button {
 .as-dev:first-child {
   margin-top: 0;
 }
+
+/* Arrangement scrollbars, drawn over the lane canvas's right and bottom edges. */
+.sb {
+  position: absolute;
+  z-index: 3;
+  background: #0d0f14b0;
+}
+.sb[hidden] {
+  display: none;
+}
+.sb-h {
+  left: 0;
+  right: 10px;
+  bottom: 0;
+  height: 10px;
+  border-top: 1px solid var(--border);
+}
+.sb-v {
+  top: 0;
+  right: 0;
+  bottom: 10px;
+  width: 10px;
+  border-left: 1px solid var(--border);
+}
+.sb-thumb {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: 4px;
+  background: var(--bg4);
+  border: 1px solid var(--border-lt);
+  box-sizing: border-box;
+  cursor: grab;
+}
+.sb-h .sb-thumb {
+  height: 100%;
+}
+.sb-v .sb-thumb {
+  width: 100%;
+}
+.sb-thumb:hover,
+.sb-thumb.active {
+  background: #3a4160;
+  border-color: var(--accent);
+}
+.sb-thumb.active {
+  cursor: grabbing;
+}
+
+/* Track colour palette. */
+.swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 22px);
+  gap: 5px;
+  padding: 4px 8px 6px;
+}
+.swatch-pick {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.swatch-pick:hover {
+  border-color: var(--fg-dim);
+}
+.swatch-pick.on {
+  border-color: var(--fg);
+}
+.swatch-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 6px;
+  font-size: 11px;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.swatch-custom {
+  width: 26px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: none;
+  cursor: pointer;
+}

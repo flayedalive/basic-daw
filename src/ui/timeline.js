@@ -710,6 +710,7 @@ function onRulerDown(e) {
 
 function onWheel(e) {
   e.preventDefault();
+  if (e.altKey) return zoomTracks(Math.pow(1.0015, -(e.deltaY || e.deltaX)), localPos(e, e.currentTarget).y);
   if (e.ctrlKey || e.metaKey) {
     const anchorX = localPos(e, e.currentTarget).x;
     zoomAt(anchorX, Math.pow(1.0025, -e.deltaY));
@@ -760,6 +761,44 @@ export function scrollTracksTo(y) {
 }
 
 export const viewportHeight = () => height;
+export const viewportWidth = () => width;
+
+/** Scroll the lanes so track `index` is fully visible (no-op if it already is). */
+export function revealTrack(index) {
+  const tops = trackTops();
+  const t = state.project.tracks[index];
+  if (!t) return;
+  const top = tops[index];
+  if (top < view.scrollY) scrollTracksTo(top);
+  else if (top + t.height > view.scrollY + height) scrollTracksTo(top + t.height - height);
+}
+
+// Track heights, kept in step with the drag-resize limits in tracks.js.
+const TRACK_MIN_H = 34;
+const TRACK_MAX_H = 260;
+let heightUndoAt = 0;
+
+/**
+ * Scale every track's height (Alt + wheel), keeping the track under the
+ * pointer where it is. One undo step per gesture, not per wheel notch.
+ */
+export function zoomTracks(factor, anchorY = height / 2) {
+  const tracks = state.project.tracks;
+  if (!tracks.length) return;
+  const now = performance.now();
+  if (now - heightUndoAt > 600) pushUndo("track height");
+  heightUndoAt = now;
+  // Where the pointer sits, as track index + fraction, before resizing.
+  const hit = trackAtY(anchorY);
+  const frac = hit ? (anchorY + view.scrollY - hit.top) / hit.track.height : 0;
+  for (const t of tracks) t.height = clamp(Math.round(t.height * factor), TRACK_MIN_H, TRACK_MAX_H);
+  if (hit) {
+    const top = trackTops()[hit.index];
+    view.scrollY = top + frac * hit.track.height - anchorY;
+  }
+  view.scrollY = clamp(view.scrollY, 0, Math.max(0, contentHeight() - height));
+  changed("tracks");
+}
 
 /* ── drop from the pool ───────────────────────────────────────────────── */
 

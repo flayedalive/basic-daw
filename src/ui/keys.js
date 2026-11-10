@@ -18,6 +18,10 @@ import {
   zoomToFit,
   scrollToPlayhead,
   addMarker,
+  revealTrack,
+  scrollTracksTo,
+  view,
+  viewportHeight,
 } from "./timeline.js";
 import { addTrack } from "./tracks.js";
 import { toggleMixer } from "./mixer.js";
@@ -49,9 +53,14 @@ const KEYMAP = [
   ["View", null],
   ["+ / −", "Zoom in / out"],
   ["Z", "Zoom to fit"],
-  ["Ctrl/⌘ wheel", "Zoom at pointer"],
+  ["↑ ↓", "Select the previous / next track (scrolls it into view)"],
+  ["Page Up / Down", "Scroll tracks a screen at a time"],
+  ["Wheel", "Scroll tracks up / down"],
   ["⇧ wheel", "Scroll horizontally"],
+  ["Ctrl/⌘ wheel", "Zoom at pointer"],
+  ["Alt wheel", "Make every track taller / shorter"],
   ["Middle-drag / Alt-drag", "Pan the arrangement"],
+  ["Scrollbars", "Drag, or click either side of the thumb to page"],
   ["F3", "Show / hide the mixer"],
   ["Session", null],
   ["Ctrl/⌘ S", "Save"],
@@ -171,8 +180,24 @@ function onKey(e) {
       return e.altKey ? stretchSelection(dir) : nudgeSelection(dir, e.shiftKey);
     }
     case "ArrowUp":
-    case "ArrowDown":
+    case "ArrowDown": {
+      // Step the selected track and keep it on screen.
+      e.preventDefault();
+      const ts = state.project.tracks;
+      if (!ts.length) return;
+      const cur = ts.findIndex((t) => t.id === state.selectedTrackId);
+      const i = Math.max(0, Math.min(ts.length - 1, (cur < 0 ? 0 : cur) + (key === "ArrowDown" ? 1 : -1)));
+      state.selectedTrackId = ts[i].id;
+      state.focusedStrip = ts[i].id;
+      revealTrack(i);
+      changed("selection", false);
+      bus.emit("mixfocus");
       return;
+    }
+    case "PageUp":
+    case "PageDown":
+      e.preventDefault();
+      return scrollTracksTo(view.scrollY + (key === "PageDown" ? 1 : -1) * viewportHeight() * 0.9);
     case "?":
       return showHelp();
     case "+":

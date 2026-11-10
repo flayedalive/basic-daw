@@ -6,7 +6,7 @@ import { bus, changed, newTrack, pushUndo, state, trackById } from "../state.js"
 import { engine } from "../audio/engine.js";
 import { DEFAULT_INPUT, input, inputChoices, parseInput, setTrackInput, trackInputLabel } from "../audio/input.js";
 import { fader, meterBar } from "./controls.js";
-import { registerTracksApi, draw as drawTimeline, view, viewportHeight } from "./timeline.js";
+import { registerTracksApi, draw as drawTimeline, view, viewportHeight, zoomTracks } from "./timeline.js";
 
 const MIN_H = 34;
 const MAX_H = 260;
@@ -25,6 +25,7 @@ export function initTracks() {
   host.addEventListener("wheel", (e) => {
     // Wheeling over the headers scrolls the lanes, not the page.
     e.preventDefault();
+    if (e.altKey) return zoomTracks(Math.pow(1.0015, -(e.deltaY || e.deltaX)), e.clientY - host.getBoundingClientRect().top);
     view.scrollY = clamp(view.scrollY + e.deltaY, 0, Math.max(0, contentH() - viewportHeight()));
     changed("view", false);
   }, { passive: false });
@@ -78,10 +79,48 @@ function duplicateTrack(id) {
   engine.invalidate();
 }
 
+/** A palette popover: the preset colours as swatches, plus any colour you like. */
+function colourPicker(x, y, track) {
+  const set = (c, undoable = true) => {
+    if (undoable) pushUndo("track colour");
+    track.color = c;
+    changed("tracks");
+  };
+  const menu = popupMenu(x, y, [{ title: "Track colour" }]);
+  const grid = el(
+    "div.swatch-grid",
+    null,
+    TRACK_COLORS.map((c) =>
+      el(`button.swatch-pick${c.toLowerCase() === String(track.color).toLowerCase() ? ".on" : ""}`, {
+        style: { background: c },
+        title: c,
+        onclick: (e) => {
+          e.stopPropagation();
+          set(c);
+          menu.remove();
+        },
+      }),
+    ),
+  );
+  let pushed = false;
+  const custom = el("input.swatch-custom", {
+    type: "color",
+    value: /^#[0-9a-f]{6}$/i.test(track.color) ? track.color : "#5cc8ff",
+    title: "Any colour",
+    // Live while dragging in the picker; one undo step for the whole drag.
+    oninput: (e) => {
+      set(e.target.value, !pushed);
+      pushed = true;
+    },
+  });
+  menu.append(grid, el("label.swatch-row", null, custom, "Custom…"));
+}
+
 function trackMenu(track) {
   return [
     { title: track ? track.name : "Tracks" },
     { label: "Add track", sc: "T", onClick: () => addTrack() },
+    ...(track ? [{ label: "Colour…", onClick: () => colourPicker(innerWidth / 2 - 80, innerHeight / 3, track) }] : []),
     { label: "Duplicate track", disabled: !track, onClick: () => duplicateTrack(track.id) },
     { label: "Delete track", disabled: !track, onClick: () => deleteTrack(track.id) },
     "-",
@@ -162,18 +201,7 @@ function buildHead(track, index, top) {
     title: "Track colour",
     onclick: (e) => {
       e.stopPropagation();
-      popupMenu(
-        e.clientX,
-        e.clientY,
-        TRACK_COLORS.map((c) => ({
-          label: c === track.color ? "● current" : "●",
-          onClick: () => {
-            pushUndo("track colour");
-            track.color = c;
-            changed("tracks");
-          },
-        })),
-      );
+      colourPicker(e.clientX, e.clientY, track);
     },
   });
 

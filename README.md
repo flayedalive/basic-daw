@@ -41,6 +41,10 @@ Everything runs client-side, so nothing you import ever leaves your machine.
   corners for fades, `S` to split at the playhead, Alt-drag to copy
 - Grid snapping down to 1/16 and triplets, or off; hold Shift to ignore the grid
 - Loop region, markers, marquee select, clipboard, unlimited undo
+- Navigate with scrollbars on both axes, wheel / ⇧ wheel, ↑ ↓ to step through
+  tracks (scrolling them into view), Page Up / Down, and Alt + wheel to make
+  every track taller or shorter
+- Pick a track colour from the swatch in its header (presets or any colour)
 
 **Clips**
 - Gain, fade in/out with equal-power / linear / exponential shapes
