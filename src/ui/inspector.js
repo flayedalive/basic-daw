@@ -763,6 +763,7 @@ function renderFx() {
   }
   if (kind === "core.tuner") parts.push(tunerDisplay(mode.ownerId, def.id));
   if (plugin.category === "Dynamics") parts.push(reductionMeter(mode.ownerId, def.id));
+  if (kind === "core.autotune") parts.push(correctionReadout(mode.ownerId, def.id));
   body.append(section(plugin.name, ...parts, ...custom, ...rows));
 }
 
@@ -823,6 +824,33 @@ function reductionMeter(ownerId, fxId) {
     shown = target < shown ? target : shown + (target - shown) * 0.15; // fast down, slow back
     fill.style.width = `${clamp(-shown / 24, 0, 1) * 100}%`;
     val.textContent = `${shown.toFixed(1)} dB`;
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(() => requestAnimationFrame(frame));
+  return root;
+}
+
+/**
+ * What the Auto-Tune insert is doing: the note it hears, how far off it is,
+ * and the note it is pulling towards. Read from the live instance each frame.
+ */
+function correctionReadout(ownerId, fxId) {
+  const names = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
+  const name = (m) => `${names[((Math.round(m) % 12) + 12) % 12]}${Math.floor(Math.round(m) / 12) - 1}`;
+  const val = el("span.val.grow", null, "—");
+  const root = el("div.prow", { title: "The note heard, how far it is from the note it is being pulled to, and the correction applied" }, el("label", null, "Hearing"), val);
+  let held = 0;
+  const frame = () => {
+    if (!root.isConnected) return;
+    const m = engine.liveEffect(ownerId, fxId)?.readout?.();
+    if (m && Number.isFinite(m.midi)) {
+      const off = Math.round((m.midi - m.note) * 100);
+      const by = Math.round(m.cents);
+      val.textContent = `${name(m.note)} ${off >= 0 ? "+" : ""}${off} ct · correcting ${by >= 0 ? "+" : ""}${by} ct`;
+      held = 20;
+    } else if (--held <= 0) {
+      val.textContent = "—";
+    }
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(() => requestAnimationFrame(frame));

@@ -20,7 +20,7 @@ const moduleUrl = (file) => new URL(`./worklets/${file}`, import.meta.url).href;
 const lookSamples = (ms, sampleRate) => Math.round(((ms ?? 0) / 1000) * sampleRate);
 
 /** A handle whose `update` writes plugin parameters to a worklet's AudioParams through `map`. */
-function workletFx(ctx, offline, name, map) {
+export function workletFx(ctx, offline, name, map) {
   const node = workletNode(ctx, name);
   let meter = 0;
   node.port.onmessage = (e) => (meter = e.data);

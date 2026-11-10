@@ -69,15 +69,16 @@ Everything runs client-side, so nothing you import ever leaves your machine.
   value (`-12`, `+3.5`, `-inf`, `L30`, `C`); Alt-click resets
 - CLIP lights on every strip and the master latch when a level reaches
   0 dBFS; click to clear
-- Insert chains on every track and the master, thirty-seven effects out of the box:
+- Insert chains on every track and the master, thirty-eight effects out of the box:
   4-band EQ (with a live response curve), 10- and 31-band graphic EQs, tilt EQ,
   filter, auto-wah, compressor, bus compressor (sidechain high-pass, parallel
   mix), 3-band multiband compressor, de-esser / dynamic EQ,
   true-peak limiter, clipper, noise gate, delay, ping-pong echo, reverb, plate reverb, chorus,
   tremolo, saturator, tube warmth, harmonic exciter, bit crusher, wavefolder, stereo width, Haas
-  widener, trim, tuner
+  widener, trim, tuner, Auto-Tune (real-time pitch correction to a key and scale,
+  formants kept)
 - Plugin delay compensation: an insert that looks ahead (the compressors, a
-  gate with look-ahead) reports its latency and the other tracks, the playhead,
+  gate with look-ahead, Auto-Tune) reports its latency and the other tracks, the playhead,
   the metronome and the bounce are lined up to it
 - For guitar: an amp sim (clean / crunch / high gain, tone stack, cabinet) that
   loads your own cabinet impulse responses, and a pedal pack — overdrive,
@@ -183,6 +184,7 @@ src/
     multiband.js      3-band compressor on Linkwitz–Riley crossovers
     worklets.js       loads plugins' AudioWorklet modules into each context
     dynamics.js       worklet plugins (gate, true-peak limiter, bus compressor, de-esser)
+    autotune.js       real-time pitch correction (worklet)
     worklets/         their AudioWorklet processors
     tuner.js          the tuner insert (registered with the built-ins)
     pitch.js          YIN pitch detection and note naming, DOM-free
@@ -274,6 +276,11 @@ There is a `/daw-plugin` skill that walks an agent through designing one to spec
   corrections within about two semitones. It will not separate chords, and a
   large shift changes the character of the voice. Editing a clip's pitch
   renders a second copy of its audio into the pool
+- Auto-Tune delays its track by 32 ms. Playback and bounces hide that; live
+  monitoring through it cannot, so sing to the dry signal and tune afterwards,
+  or accept the delay. It follows one note at a time, from about 80 Hz up, and
+  decides note by note as the sound arrives — the pitch editor, which sees the
+  whole phrase first, is the better tool for anything already recorded
 - Overlapping clips on one track both play; no automatic crossfade.
 - No parameter automation lanes yet — mixer moves are static per session.
 - Recording sets the loop aside: a take runs linearly from where it started,

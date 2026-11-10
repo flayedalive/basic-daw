@@ -23,6 +23,7 @@ import { ampPlugin, cabPlugin } from "./amp.js";
 import { geq31Plugin } from "./geq31.js";
 import { multibandPlugin } from "./multiband.js";
 import { gatePlugin, limiterPlugin, busCompPlugin, deEsserPlugin } from "./dynamics.js";
+import { autoTunePlugin } from "./autotune.js";
 
 const P = (key, label, min, max, def, extra = {}) => ({ key, label, min, max, def, ...extra });
 
@@ -450,6 +451,7 @@ export function registerBuiltins() {
 
   // Lives in its own module: the pitch detector is the bulk of it.
   add(tunerPlugin);
+  add(autoTunePlugin);
   // Likewise: the amp is a chain of two dozen nodes and its cabinet loader.
   add(ampPlugin);
   add(cabPlugin);

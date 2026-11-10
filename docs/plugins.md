@@ -437,6 +437,16 @@ pure function of its input and its parameters:
 AudioParam, look-ahead as a delay line, the port used once per ~40 ms to report
 how open the gate is.
 
+A processor that keeps a clock of its own — a detector that runs every 5 ms, a
+grain laid every period — has one more thing to get right: that clock must
+start from the signal, not from when the node was made. Live, a chain is built
+whenever the user touches it and the audio arrives at some later sample; in a
+bounce it arrives at another. `worklets/autotune.js` goes idle after a ring's
+worth of silence and starts its clocks on the first sample that is not, and
+counts in samples rather than 128-frame blocks — so the same audio gives the
+same output wherever it falls. (The host's priming signal, 400 dB down, has to
+count as silence for this.)
+
 ### Latency
 
 A plugin that looks ahead delays the signal. Say by how much and the host
@@ -455,6 +465,9 @@ latency: (p, sampleRate) => p.lookahead / 1000,   // or a plain number: latency:
   cuts it from the head, so a bounced file starts where the timeline does.
 - A bypassed insert reports nothing. Input monitoring does hear the delay —
   there is no way to compensate something that has not been played yet.
+
+Auto-Tune's delay is fixed: 32 ms, the room its shifter needs to cut a grain
+around a point it has not played yet.
 
 The native `DynamicsCompressorNode` has 6 ms of look-ahead built in; the
 Compressor, Limiter and Multiband Compressor report it.
