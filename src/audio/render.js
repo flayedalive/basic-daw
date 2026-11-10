@@ -4,7 +4,8 @@
 
 import { dbToGain, clamp } from "../util.js";
 import { assets, state, trackAudible } from "../state.js";
-import { buildChain } from "./effects.js";
+import { buildChain, chainLatency } from "./effects.js";
+import { prepareContext } from "../plugins/worklets.js";
 import { scheduleClipEnvelope } from "./engine.js";
 import { encodeWav } from "./wav.js";
 import { measureBuffer, gainToTarget } from "./loudness.js";
@@ -33,8 +34,19 @@ export async function renderRange(start, end, opts = {}) {
   const tail = opts.tailSec ?? 2;
   const duration = Math.max(0.05, end - start + tail);
   const frames = Math.ceil(duration * sampleRate);
+  const applyMaster = opts.applyMaster !== false;
+  const tracks = project.tracks.filter((t) => !opts.trackIds || opts.trackIds.includes(t.id));
+
+  // Plugin delay compensation, as the engine does it: each track is held back
+  // to match the slowest one, and what that and the master chain add to
+  // everything is rendered as extra length and cut from the head.
+  const slowest = tracks.reduce((m, t) => Math.max(m, chainLatency(t.fx)), 0);
+  const late = Math.round((slowest + (applyMaster ? chainLatency(project.master.fx) : 0)) * sampleRate);
   const lead = Math.round(PRE_ROLL * sampleRate);
-  const ctx = new OfflineAudioContext(2, lead + frames, sampleRate);
+  const ctx = new OfflineAudioContext(2, lead + late + frames, sampleRate);
+  // Worklet plugins need their processor modules in this context before a
+  // chain can be built; `create` itself stays synchronous.
+  await prepareContext(ctx);
 
   const masterIn = ctx.createGain();
   const masterGain = ctx.createGain();
@@ -53,7 +65,14 @@ export async function renderRange(start, end, opts = {}) {
     gain.gain.value = dbToGain(track.volumeDb);
     pan.pan.value = clamp(track.pan, -1, 1);
     buildChain(ctx, track.fx, input, gain, true);
-    gain.connect(pan).connect(masterIn);
+    const hold = slowest - chainLatency(track.fx);
+    if (hold > 1e-7) {
+      const comp = ctx.createDelay(Math.max(1, hold + 0.01));
+      comp.delayTime.value = hold;
+      gain.connect(pan).connect(comp).connect(masterIn);
+    } else {
+      gain.connect(pan).connect(masterIn);
+    }
     inputs.set(track.id, input);
   }
 
@@ -91,9 +110,9 @@ export async function renderRange(start, end, opts = {}) {
     src.start(when, srcOffset, Math.min(playSecs * pb.consume, src.buffer.duration - srcOffset));
   }
 
-  if (opts.onProgress) trackProgress(ctx, PRE_ROLL + duration, opts.onProgress);
+  if (opts.onProgress) trackProgress(ctx, PRE_ROLL + late / sampleRate + duration, opts.onProgress);
   const rendered = await ctx.startRendering();
-  return sliceBuffer(rendered, lead, frames);
+  return sliceBuffer(rendered, lead + late, frames);
 }
 
 /** `count` frames of `buffer` from `from`, as a new buffer. */

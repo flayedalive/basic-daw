@@ -41,7 +41,9 @@ export const multibandPlugin = {
   name: "Multiband Compressor",
   category: "Dynamics",
   description:
-    "Three bands, each with its own compressor, split by crossovers that sum flat. With every ratio at 1:1 it is transparent apart from 6 ms of delay.",
+    "Three bands, each with its own compressor, split by crossovers that sum flat. With every ratio at 1:1 it is transparent. Its 6 ms of look-ahead is compensated.",
+  // The native compressors' look-ahead; the engine and the bounce compensate.
+  latency: 0.006,
   params: [
     P("xLow", "Low / mid", 60, 1000, 200, { unit: "Hz", log: true }),
     P("xHigh", "Mid / high", 1000, 10000, 2500, { unit: "Hz", log: true }),
@@ -88,8 +90,6 @@ export const multibandPlugin = {
     return {
       input,
       output: out,
-      /** The native compressors' look-ahead, for latency compensation. */
-      latency: 0.006,
       update(p) {
         const set = (param, v) => setAudioParam(ctx, param, v, offline);
         // Keep the crossovers apart: bands that cross over each other stop summing flat.

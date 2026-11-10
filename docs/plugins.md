@@ -27,7 +27,9 @@ you need per-frame logic (see [Limits](#limits)).
 That is what makes an export match what you heard, and it is the only thing a
 plugin may not break. In practice it means:
 
-- **No module loading at build time.** `create` is synchronous.
+- **No module loading at build time.** `create` is synchronous. (A plugin that
+  needs an AudioWorklet module declares it and the host loads it beforehand —
+  see [Worklet plugins](#worklet-plugins).)
 - **No state that only exists live.** The offline render builds a fresh
   instance from the same parameters and expects the same sound.
 - **No `currentTime` assumptions.** Offline, `currentTime` is pinned at 0. The
@@ -304,8 +306,8 @@ rewiring at all.
 The JSON tier describes a **fixed graph of native nodes**. It cannot:
 
 - **Run per-sample or per-frame logic.** An envelope follower needs to read a
-  signal and act on it every frame. That is what the built-in Noise Gate's
-  `tick(dt)` does, and it is why the gate is a JS plugin.
+  signal and act on it sample by sample. That takes an AudioWorklet, which is
+  why the Noise Gate is a JS plugin with a processor module.
 - **Read the signal at all.** Nothing in a manifest can branch on audio.
 - **Allocate per-note or per-voice structures.** There is no note model.
 
@@ -352,12 +354,110 @@ export default {
 
 Declare `rebuildOn: ["someKey"]` if a parameter changes the graph's shape.
 
+Two more fields on the spec itself are optional:
+
+| Key | |
+|---|---|
+| `worklets` | `[{ name, url }]` — AudioWorklet modules the plugin's processors live in. See below. |
+| `latency` | Seconds of delay the plugin adds: a number, or `(params) => seconds`. See [Latency](#latency). |
+
 Load one with a `.js` URL in the plugin manager. It asks first, because unlike a
 manifest this executes code. JS plugins are **not** persisted between sessions.
 
 The built-ins in `src/plugins/builtin.js` are all JS plugins and are the best
 reference; `src/plugins/amp.js` (amp sim, cabinet) is the one to read for a
 larger graph and for a parameter that points at pool audio.
+
+---
+
+## Worklet plugins
+
+Native nodes cannot read the signal. A plugin whose sound depends on doing so —
+a gate, a look-ahead limiter, a pitch corrector — runs its DSP in an
+`AudioWorkletProcessor`. Doing that work in `tick()` instead is the mistake to
+avoid: `tick` runs on the UI clock and only live, so the bounce comes out
+unprocessed. (The Noise Gate did exactly that until it was rewritten.)
+
+A processor lives in a module that must be loaded into an audio context before
+a node can be made from it. Loading is asynchronous and `create` is not allowed
+to be, so **the host does the loading**:
+
+```js
+import { workletNode } from "./worklets.js";
+
+export const myPlugin = {
+  id: "me.follower",
+  name: "Follower",
+  params: [{ key: "amount", label: "Amount", min: 0, max: 1, def: 0.5 }],
+  // The processor module, next to this file. `code: "…source…"` works in place of `url`.
+  worklets: [{ name: "me-follower", url: new URL("./worklets/follower.js", import.meta.url).href }],
+
+  create(ctx, offline) {
+    const node = workletNode(ctx, "me-follower"); // stereo in, stereo out, channel count pinned
+    return {
+      input: node,
+      output: node,
+      update(p) { setAudioParam(ctx, node.parameters.get("amount"), p.amount, offline); },
+    };
+  },
+};
+```
+
+- The engine loads every registered module when the audio context is created,
+  and again when a plugin is installed. A chain built before its modules have
+  arrived holds a **passthrough** in the plugin's place; the engine rebuilds
+  the chain as soon as they are in.
+- The bounce awaits the same modules for its `OfflineAudioContext` before it
+  builds anything, so a bounce never renders a passthrough.
+- No bundler: a module is a plain file under `src/`, addressed with
+  `new URL(…, import.meta.url)`, or source text handed over as `code`.
+
+### Parity rules for a processor
+
+A worklet plugin keeps "bounce matches playback" only if its processor is a
+pure function of its input and its parameters:
+
+1. **Settings travel as AudioParams** (`static get parameterDescriptors()`), or
+   as `processorOptions` for things fixed at construction. Never as port
+   messages: a message arrives when the main thread gets round to sending it,
+   not at a point on the render clock, so live and offline would apply it at
+   different samples — and offline, quite possibly after the render is over.
+2. **`port` is for metering only** — the processor telling the UI something
+   (gain reduction, a level). Nothing the processor hears back may change the
+   audio.
+3. **No unseeded randomness and no wall-clock time.** `Math.random()` and
+   `Date.now()` differ between two renders. Seed a generator from
+   `processorOptions` if you need noise.
+4. **State starts from zero** in the constructor and depends only on the
+   samples processed since. Do not carry anything in from module scope.
+5. **Return `true` from `process`.** A processor that returns `false` once its
+   input goes quiet is torn down live but not offline.
+
+`src/plugins/worklets/gate.js` is the reference: every setting a k-rate
+AudioParam, look-ahead as a delay line, the port used once per ~40 ms to report
+how open the gate is.
+
+### Latency
+
+A plugin that looks ahead delays the signal. Say by how much and the host
+compensates:
+
+```js
+latency: (p) => p.lookahead / 1000,   // or a plain number: latency: 0.006
+```
+
+- Each track is delayed by the difference between the slowest track's insert
+  latency and its own, so all tracks reach the master together. (Routing is
+  tracks → master only, which is what keeps this to one delay per track.)
+- What remains — the slowest track plus the master chain — delays everything
+  alike. The engine takes it off the playhead, adds it to the metronome and to
+  the shift applied to recorded takes; the bounce renders that much extra and
+  cuts it from the head, so a bounced file starts where the timeline does.
+- A bypassed insert reports nothing. Input monitoring does hear the delay —
+  there is no way to compensate something that has not been played yet.
+
+The native `DynamicsCompressorNode` has 6 ms of look-ahead built in; the
+Compressor, Limiter and Multiband Compressor report it.
 
 ---
 
@@ -373,6 +473,18 @@ node .claude/skills/daw-plugin/validate.mjs my-plugin.json
 It uses exactly the rules the app applies — `src/plugins/schema.js` is shared,
 and touches neither the DOM nor Web Audio for this reason.
 
+Add `--build` to instantiate the plugin against a mock audio context and sweep
+every parameter to its extremes. JS plugins can be checked the same way, by
+module path:
+
+```sh
+node .claude/skills/daw-plugin/validate.mjs src/plugins/dynamics.js --build
+```
+
+For a worklet plugin this loads the real processor module and runs it over
+noise at each setting, so a processor that throws or produces `NaN` at the edge
+of a range fails here rather than in someone's session.
+
 ## Where things live
 
 ```
@@ -384,6 +496,9 @@ src/plugins/
   dsp.js           curves and impulse responses, shared by both tiers
   builtin.js       the JS effects that ship with the app (the tuner's code is in tuner.js / pitch.js)
   amp.js           amp sim and speaker cabinet, with user impulse responses
+  worklets.js      loads plugins' AudioWorklet modules into each context
+  dynamics.js      the worklet plugins' faces (gate, …)
+  worklets/        their processors, one self-contained module each
   loader.js        install from file / URL / text, persist to IndexedDB
   bundled/         the JSON plugins that ship with the app
 ```

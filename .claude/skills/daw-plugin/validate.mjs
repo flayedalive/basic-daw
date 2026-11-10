@@ -4,12 +4,13 @@
 //   node validate.mjs my-plugin.json            check the manifest
 //   node validate.mjs my-plugin.json --build    also build it and sweep every parameter
 //   node validate.mjs src/plugins/bundled/*.json --build
+//   node validate.mjs src/plugins/dynamics.js --build   JS plugins, worklet ones included
 //
 // This imports src/plugins/schema.js directly rather than reimplementing it, so
 // it cannot drift from what the installer accepts.
 
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -41,8 +42,70 @@ const dim = (s) => `\x1b[2m${s}\x1b[0m`;
 
 let failed = 0;
 
+/**
+ * A JS plugin module: every exported object with an `id` and a `create`.
+ * Registered through the app's own registry (so its parameter block gets the
+ * installer's scrutiny), then, with --build, instantiated live and offline
+ * against the mock context with every parameter swept to its extremes. A
+ * worklet plugin's processor modules are loaded for real and run over noise at
+ * each setting, so a processor that throws or emits NaN is caught here.
+ */
+async function checkJsModule(file) {
+  const { installDomStubs, MockAudioContext } = await import(resolve(HERE, "mock-audio.mjs"));
+  installDomStubs();
+  const registry = await import(resolve(SRC, "registry.js"));
+  const worklets = await import(resolve(SRC, "worklets.js"));
+  const mod = await import(pathToFileURL(resolve(file)).href);
+  const specs = Object.values(mod).filter((v) => v && typeof v === "object" && typeof v.id === "string" && typeof v.create === "function");
+  if (!specs.length) {
+    console.log(`  ${red("✗ no plugin exported")} — expected an exported object with "id" and "create"`);
+    return 1;
+  }
+  let bad = 0;
+  for (const spec of specs) {
+    console.log(`  ${spec.id}`);
+    try {
+      const entry = registry.getPlugin(spec.id) ?? registry.registerPlugin(spec, "user");
+      const notes = [`${spec.params.length} params`, spec.category ?? "Other", entry.worklets?.length ? `worklets: ${entry.worklets.map((w) => w.name).join(", ")}` : null, entry.latency ? "reports latency" : null];
+      console.log(`  ${green("✓ valid")} ${dim(notes.filter(Boolean).join(" · "))}`);
+      if (!build) continue;
+      let updates = 0;
+      for (const offline of [false, true]) {
+        const ctx = new MockAudioContext();
+        await worklets.prepareContext(ctx);
+        const def = registry.newEffect(spec.id);
+        const fx = registry.createEffect(ctx, def, offline);
+        if (fx.pending) throw new Error("worklet modules did not load");
+        const defaults = registry.defaultParams(spec.id);
+        for (const p of spec.params) {
+          const values = p.choices ? p.choices : p.bool ? [true, false] : p.asset ? ["", "ast_not_in_pool"] : [p.min, (p.min + p.max) / 2, p.max];
+          for (const v of values) {
+            fx.update({ ...defaults, [p.key]: v });
+            const l = registry.latencyOf({ ...def, params: { ...defaults, [p.key]: v } });
+            if (!Number.isFinite(l) || l < 0) throw new Error(`latency is ${l} with ${p.key} = ${v}`);
+            for (const node of ctx.workletNodes) node.exercise(ctx.sampleRate);
+            updates++;
+          }
+        }
+        fx.update(defaults);
+        fx.dispose?.();
+      }
+      console.log(`  ${green("✓ builds")} ${dim(`${updates} parameter updates, live and offline${entry.worklets?.length ? ", processors run at each" : ""}`)}`);
+    } catch (err) {
+      console.log(`  ${red("✗ failed")} — ${err.message}`);
+      bad++;
+    }
+  }
+  return bad;
+}
+
 for (const file of files) {
   console.log(`\n${file}`);
+
+  if (/\.m?js$/.test(file)) {
+    failed += await checkJsModule(file);
+    continue;
+  }
 
   let manifest;
   try {

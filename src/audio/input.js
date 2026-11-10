@@ -602,7 +602,9 @@ class Input {
         const part = { key, dev, tap: null };
         parts.push(part);
         part.tap = await dev.recorder();
-        part.roundTrip = this.compensation(key).seconds;
+        // Plus whatever the mix itself is running late by (plugin look-ahead):
+        // the player is in time with what they hear, not with the clips.
+        part.roundTrip = this.compensation(key).seconds + engine.latency.total;
         // Snapshot which inputs feed which tracks: changing a track's input
         // mid-take should not rewrite the take.
         part.targets = list.map((t) => ({ trackId: t.id, chans: parseInput(t.input, dev.channels) }));

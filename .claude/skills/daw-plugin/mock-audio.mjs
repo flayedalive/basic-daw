@@ -4,6 +4,8 @@
 // `disconnect` throws if asked to remove a connection that was never made,
 // which is how a stale edge left behind by a `when` clause gets caught.
 
+import { pathToFileURL } from "node:url";
+
 class Param {
   constructor(v = 0) {
     this.value = v;
@@ -44,11 +46,98 @@ class Node {
   }
 }
 
+/* ── AudioWorklet ─────────────────────────────────────────────────────── */
+
+// Node has no AudioWorkletGlobalScope, so this file is one: processor modules
+// are imported with `registerProcessor`, `AudioWorkletProcessor` and
+// `sampleRate` defined as globals, and the classes they register are kept
+// here. That is enough to build a worklet plugin against the mock context AND
+// to run its real DSP over real blocks of samples — which is how `--build`
+// (and the Node tests) catch a processor that throws or emits NaN at an
+// extreme parameter value.
+
+const processors = new Map(); // name -> class
+
+function installWorkletGlobals(sampleRate) {
+  globalThis.sampleRate = sampleRate;
+  globalThis.currentFrame = 0;
+  globalThis.currentTime = 0;
+  globalThis.AudioWorkletProcessor ??= class AudioWorkletProcessor {
+    constructor() {
+      this.port = { postMessage: (m) => this.port.onposted?.(m), onmessage: null };
+    }
+  };
+  globalThis.registerProcessor ??= (name, cls) => processors.set(name, cls);
+}
+
+/** Import a processor module (a file path or file: URL), registering what it defines. */
+export async function loadWorkletModule(url, sampleRate = 48000) {
+  installWorkletGlobals(sampleRate);
+  await import(String(url).startsWith("file:") ? url : pathToFileURL(String(url)).href);
+}
+
+export const processorClass = (name) => processors.get(name);
+
+/**
+ * Run a registered processor over `input` ([L, R] Float32Arrays) in 128-frame
+ * blocks, as the audio thread would, and return its output channels.
+ * `params` are plain numbers, or functions of the block's start frame for
+ * automation. opts: { sampleRate, options (the node's processorOptions) }.
+ */
+export function runProcessor(name, input, params = {}, { sampleRate = 48000, options = {}, onMessage } = {}) {
+  const Cls = processors.get(name);
+  if (!Cls) throw new Error(`no processor "${name}" has been registered`);
+  installWorkletGlobals(sampleRate);
+  const proc = new Cls({ processorOptions: options, numberOfInputs: 1, numberOfOutputs: 1 });
+  if (onMessage) proc.port.onposted = onMessage;
+  const descriptors = Cls.parameterDescriptors ?? [];
+  const n = input[0].length;
+  const out = [new Float32Array(n), new Float32Array(n)];
+  for (let at = 0; at < n; at += 128) {
+    const len = Math.min(128, n - at);
+    globalThis.currentFrame = at;
+    globalThis.currentTime = at / sampleRate;
+    const values = {};
+    for (const d of descriptors) {
+      const v = params[d.name];
+      values[d.name] = Float32Array.of(typeof v === "function" ? v(at) : (v ?? d.defaultValue));
+    }
+    const blockIn = [input[0].subarray(at, at + len), (input[1] ?? input[0]).subarray(at, at + len)];
+    const blockOut = [out[0].subarray(at, at + len), out[1].subarray(at, at + len)];
+    proc.process([blockIn], [blockOut], values);
+  }
+  return out;
+}
+
+class MockWorkletNode extends Node {
+  constructor(ctx, name, options = {}) {
+    super(`worklet:${name}`);
+    const Cls = processors.get(name);
+    if (!Cls) throw new Error(`AudioWorkletNode: processor "${name}" is not registered in this context — is its module in the plugin's "worklets" list?`);
+    this.name = name;
+    this.options = options;
+    this.parameters = new Map((Cls.parameterDescriptors ?? []).map((d) => [d.name, new Param(d.defaultValue ?? 0)]));
+    this.port = { postMessage() {}, onmessage: null };
+    ctx.workletNodes.push(this);
+  }
+  /** Push noise through the real processor at this node's current parameter values. */
+  exercise(sampleRate) {
+    const n = 1024;
+    let seed = 1;
+    const noise = () => Float32Array.from({ length: n }, () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 1.5);
+    const params = Object.fromEntries([...this.parameters].map(([k, p]) => [k, p.value]));
+    const out = runProcessor(this.name, [noise(), noise()], params, { sampleRate, options: this.options.processorOptions });
+    for (const ch of out) for (const v of ch) if (!Number.isFinite(v)) throw new Error(`processor "${this.name}" produced a non-finite sample with ${JSON.stringify(params)}`);
+  }
+}
+
 export class MockAudioContext {
   constructor(sampleRate = 48000) {
     this.sampleRate = sampleRate;
     this.currentTime = 0;
     this.destination = new Node("destination");
+    this.workletNodes = [];
+    this.audioWorklet = { addModule: (url) => loadWorkletModule(url, sampleRate) };
   }
   #n(kind, extra = {}) {
     return Object.assign(new Node(kind), extra);
@@ -122,6 +211,7 @@ export class MockAudioContext {
 
 /** The app's util.js registers DOM listeners at import time; satisfy them. */
 export function installDomStubs() {
+  globalThis.AudioWorkletNode ??= MockWorkletNode;
   globalThis.addEventListener ??= () => {};
   globalThis.removeEventListener ??= () => {};
   globalThis.document ??= {

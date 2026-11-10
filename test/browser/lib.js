@@ -214,12 +214,16 @@ export async function liveRender(buffer, fx = [], opts = {}) {
   // …and on a render-block boundary, as an offline render's time zero is: the
   // native compressor updates its gain in fixed sub-blocks of that grid.
   const start = Math.ceil(((ctx.currentTime + (opts.settle ?? 0.25)) * ctx.sampleRate) / 128) * 128;
+  // The engine and the bounce both take a chain's reported latency back out;
+  // here that means starting the recording that much after the source.
+  const { chainLatency } = await import("../../src/plugins/registry.js");
+  const late = Math.round(chainLatency(defs) * ctx.sampleRate);
   const cap = new AudioWorkletNode(ctx, "test-capture", {
     numberOfInputs: 1,
     numberOfOutputs: 1,
     channelCount: 2,
     channelCountMode: "explicit",
-    processorOptions: { start, frames },
+    processorOptions: { start: start + late, frames },
   });
   const mute = ctx.createGain();
   mute.gain.value = 0;

@@ -7,11 +7,12 @@
 // The same `buildChain` runs inside an OfflineAudioContext during bounce, so
 // what you hear is what you render. That is the one rule a plugin must not
 // break: no state that exists only in the live context, no module loading at
-// build time.
+// build time. (A plugin's AudioWorklet modules are loaded by the host, ahead
+// of time — see plugins/worklets.js.)
 
 import { createEffect } from "../plugins/registry.js";
 
-export { createEffect, newEffect, defaultParams, signatureOf, labelOf, paramsOf, getPlugin, missingPlugins, missingInProject } from "../plugins/registry.js";
+export { createEffect, newEffect, defaultParams, signatureOf, labelOf, paramsOf, getPlugin, missingPlugins, missingInProject, latencyOf, chainLatency } from "../plugins/registry.js";
 export { makeImpulse } from "../plugins/dsp.js";
 
 /**

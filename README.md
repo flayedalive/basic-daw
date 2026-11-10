@@ -68,6 +68,9 @@ Everything runs client-side, so nothing you import ever leaves your machine.
   limiter, noise gate, delay, ping-pong echo, reverb, plate reverb, chorus,
   tremolo, saturator, tube warmth, harmonic exciter, bit crusher, wavefolder, stereo width, Haas
   widener, trim, tuner
+- Plugin delay compensation: an insert that looks ahead (the compressors, a
+  gate with look-ahead) reports its latency and the other tracks, the playhead,
+  the metronome and the bounce are lined up to it
 - For guitar: an amp sim (clean / crunch / high gain, tone stack, cabinet) that
   loads your own cabinet impulse responses, and a pedal pack — overdrive,
   distortion, fuzz, boost, phaser, flanger, octave-up
@@ -159,6 +162,9 @@ src/
     amp.js            amp sim + cabinet (user impulse responses)
     geq31.js          31-band graphic EQ
     multiband.js      3-band compressor on Linkwitz–Riley crossovers
+    worklets.js       loads plugins' AudioWorklet modules into each context
+    dynamics.js       worklet plugins (noise gate)
+    worklets/         their AudioWorklet processors
     tuner.js          the tuner insert (registered with the built-ins)
     pitch.js          YIN pitch detection and note naming, DOM-free
     loader.js         install from file / URL / text, persist to IndexedDB

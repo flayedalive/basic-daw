@@ -14,6 +14,7 @@
 // type names, so ALIASES maps those forward on load.
 
 import { uid } from "../util.js";
+import { registerWorklets, contextReady } from "./worklets.js";
 import { compileGraph, instantiate } from "./graph.js";
 import { validateManifest } from "./schema.js";
 
@@ -90,8 +91,13 @@ export function registerPlugin(spec, source = "user") {
       rebuildOn: spec.rebuildOn ?? [],
       warnings: [],
       create: spec.create,
+      // AudioWorklet modules this plugin's processors live in; the host loads them.
+      worklets: registerWorklets(spec.worklets),
     };
   }
+  // Delay the plugin adds to the signal, in seconds: a number, or a function of
+  // its parameters. The engine and the bounce compensate for it.
+  entry.latency = spec.latency ?? 0;
 
   if (plugins.has(entry.id) && plugins.get(entry.id).source !== source) {
     throw new Error(`plugin id "${entry.id}" is already taken by a ${plugins.get(entry.id).source} plugin`);
@@ -177,6 +183,13 @@ export function createEffect(ctx, def, offline = false) {
     const passthrough = ctx.createGain();
     return { input: passthrough, output: passthrough, id: def.id, type: def.type, missing: true, update() {} };
   }
+  if (plugin.worklets?.length && !contextReady(ctx, plugin.worklets)) {
+    // Its processor module is still loading. Pass audio through for now; the
+    // engine rebuilds the chain as soon as the module is in. (A bounce awaits
+    // the modules before it builds anything, so it never takes this branch.)
+    const passthrough = ctx.createGain();
+    return { input: passthrough, output: passthrough, id: def.id, type: def.type, pending: true, update() {} };
+  }
   const fx = plugin.create(ctx, offline);
   fx.type = resolveId(def.type);
   fx.id = def.id;
@@ -184,6 +197,18 @@ export function createEffect(ctx, def, offline = false) {
   fx.update({ ...defaultParams(def.type), ...def.params });
   return fx;
 }
+
+/** Seconds of delay one insert adds: 0 when bypassed or missing. */
+export function latencyOf(def) {
+  if (!def || def.on === false) return 0;
+  const plugin = getPlugin(def.type);
+  if (!plugin?.latency) return 0;
+  const v = typeof plugin.latency === "function" ? plugin.latency({ ...defaultParams(def.type), ...def.params }) : plugin.latency;
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+/** Seconds of delay a whole insert chain adds. */
+export const chainLatency = (fx) => (fx ?? []).reduce((sum, def) => sum + latencyOf(def), 0);
 
 /** Ids in `fx` that have no registered plugin. */
 export function missingPlugins(fx) {

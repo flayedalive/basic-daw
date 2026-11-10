@@ -40,10 +40,12 @@ Then read the bundled manifest closest to what you are building. They are in
 reaches the audio graph, and persisted between sessions.
 
 Write **JS** only if the effect needs to *read the signal and react to it* — an
-envelope follower, a gate, a ducker, anything with per-frame logic. The tell is
-that you want a `tick(dt)`. If you are reaching for JS for any other reason,
-re-read the node vocabulary; the answer is usually a `constant` node, a second
-gain, or a `map` expression.
+envelope follower, a gate, a ducker, a limiter. That means an AudioWorklet
+processor (docs/plugins.md, "Worklet plugins"; `src/plugins/dynamics.js` and
+`src/plugins/worklets/gate.js` are the worked example) — not `tick(dt)`, which
+only runs live and so leaves a bounce unprocessed. If you are reaching for JS
+for any other reason, re-read the node vocabulary; the answer is usually a
+`constant` node, a second gain, or a `map` expression.
 
 State the tier and the reason in one line before writing.
 
@@ -52,7 +54,8 @@ State the tier and the reason in one line before writing.
 The same graph is built inside an `OfflineAudioContext` during bounce. A bounce
 must equal what was heard. JSON plugins get this for free; a JS plugin must not
 put anything essential to the sound in `tick`, because an offline render never
-calls it.
+calls it, and a worklet processor must take its settings as AudioParams, never
+as port messages (the five parity rules are in docs/plugins.md).
 
 ## Method
 
@@ -93,6 +96,14 @@ node .claude/skills/daw-plugin/validate.mjs path/to/plugin.json --build
 
 **Run `--build` on every plugin you write.** A manifest that validates can still
 fail to build.
+
+JS plugins validate the same way, by module path — and for a worklet plugin
+`--build` loads the real processor and runs it over noise at every parameter
+extreme:
+
+```sh
+node .claude/skills/daw-plugin/validate.mjs src/plugins/dynamics.js --build
+```
 
 ## Installing it
 

@@ -22,6 +22,7 @@ import { tunerPlugin } from "./tuner.js";
 import { ampPlugin, cabPlugin } from "./amp.js";
 import { geq31Plugin } from "./geq31.js";
 import { multibandPlugin } from "./multiband.js";
+import { gatePlugin } from "./dynamics.js";
 
 const P = (key, label, min, max, def, extra = {}) => ({ key, label, min, max, def, ...extra });
 
@@ -102,6 +103,8 @@ export function registerBuiltins() {
     name: "Compressor",
     category: "Dynamics",
     description: "The native dynamics compressor with a makeup stage.",
+    // A DynamicsCompressorNode delays its signal by 6 ms of look-ahead.
+    latency: 0.006,
     params: [
       P("threshold", "Thresh", -60, 0, -18, { unit: "dB" }),
       P("ratio", "Ratio", 1, 20, 3, { unit: ":1" }),
@@ -136,6 +139,8 @@ export function registerBuiltins() {
     name: "Limiter",
     category: "Dynamics",
     description: "Drive into a fast high-ratio compressor, then soft-clip so the ceiling is a guarantee.",
+    // A DynamicsCompressorNode delays its signal by 6 ms of look-ahead.
+    latency: 0.006,
     params: [
       P("ceiling", "Ceiling", -12, 0, -0.3, { unit: "dB" }),
       P("drive", "Drive", 0, 18, 0, { unit: "dB" }),
@@ -163,52 +168,6 @@ export function registerBuiltins() {
           setAudioParam(ctx, out.gain, dbToGain(p.ceiling) / LIMIT_MAX, offline);
         },
         readout: () => comp.reduction,
-      };
-    },
-  });
-
-  add({
-    id: "core.gate",
-    name: "Noise Gate",
-    category: "Dynamics",
-    description: "Envelope-followed gate. Needs a per-frame tick, which is why it cannot be a JSON plugin.",
-    params: [
-      P("threshold", "Thresh", -80, 0, -45, { unit: "dB" }),
-      P("attack", "Attack", 0, 0.1, 0.002, { unit: "s", prec: 3 }),
-      P("release", "Release", 0.01, 1, 0.12, { unit: "s", prec: 3 }),
-    ],
-    create(ctx) {
-      // No native gate: track the envelope with an analyser on a side path and
-      // drive the gain node from the render loop (engine calls tick()).
-      const input = ctx.createGain();
-      const vca = ctx.createGain();
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 1024;
-      input.connect(vca);
-      input.connect(analyser);
-      const buf = new Float32Array(analyser.fftSize);
-      let open = 0;
-      let params = { threshold: -45, attack: 0.002, release: 0.12 };
-      return {
-        input,
-        output: vca,
-        needsTick: true,
-        update(p) {
-          params = p;
-        },
-        tick(dt) {
-          analyser.getFloatTimeDomainData(buf);
-          let peak = 0;
-          for (let i = 0; i < buf.length; i++) {
-            const a = Math.abs(buf[i]);
-            if (a > peak) peak = a;
-          }
-          const target = peak >= dbToGain(params.threshold) ? 1 : 0;
-          const tau = target > open ? Math.max(0.001, params.attack) : Math.max(0.005, params.release);
-          open += (target - open) * clamp(dt / tau, 0, 1);
-          vca.gain.setTargetAtTime(open, ctx.currentTime, 0.005);
-        },
-        readout: () => open,
       };
     },
   });
@@ -493,4 +452,6 @@ export function registerBuiltins() {
   add(cabPlugin);
   add(geq31Plugin);
   add(multibandPlugin);
+  // Worklet plugins: their sound follows the signal, which native nodes cannot do.
+  add(gatePlugin);
 }

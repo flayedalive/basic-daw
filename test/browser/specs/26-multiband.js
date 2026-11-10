@@ -24,7 +24,7 @@ test("multiband: at 1:1 the bands sum flat within 0.1 dB, 20 Hz – 20 kHz", asy
   return `worst deviation ${fmt(worst, 3)} dB`;
 });
 
-test("multiband: at 1:1 it is the dry signal, 6 ms late, to within 0.1 dB at any frequency", async () => {
+test("multiband: at 1:1 it is the dry signal to within 0.1 dB at any frequency", async () => {
   // Magnitude is flat but phase is not (the crossovers are an all-pass), so the
   // comparison is per tone rather than a waveform null.
   const notes = [];

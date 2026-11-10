@@ -16,15 +16,18 @@ import { clamp, dbToGain } from "../util.js";
 import { assets, state, trackAudible, beatSeconds } from "../state.js";
 import { buildChain, disposeChain } from "./effects.js";
 import { playbackOf } from "./clipaudio.js";
-import { signatureOf } from "../plugins/registry.js";
+import { signatureOf, chainLatency } from "../plugins/registry.js";
+import { prepareContext, contextReady } from "../plugins/worklets.js";
 
 const LOOKAHEAD = 0.35; // seconds of audio scheduled ahead of the clock
 const TICK_MS = 40;
 const CHUNK = 0.5; // max timeline seconds scheduled per pass
+const MAX_COMPENSATION = 2; // seconds of plugin latency a track can be held back by
 
 class Engine {
   constructor() {
     this.ctx = null;
+    this.latency = { tracks: 0, master: 0, total: 0 };
     this.playing = false;
     this.recording = false;
     this.tracks = new Map(); // trackId -> node bundle
@@ -52,6 +55,7 @@ class Engine {
       this.ctx = new AC({ latencyHint: "interactive" });
       this.buildMaster();
       this.syncGraph();
+      this.loadWorklets();
     }
     if (this.ctx.state === "suspended") this.ctx.resume();
     return this.ctx;
@@ -59,6 +63,22 @@ class Engine {
 
   get sampleRate() {
     return this.ctx?.sampleRate ?? 48000;
+  }
+
+  /**
+   * Load the AudioWorklet modules plugins have declared, then rebuild any chain
+   * that was built as a passthrough while waiting for them.
+   */
+  loadWorklets() {
+    const ctx = this.ctx;
+    if (!ctx || contextReady(ctx)) return;
+    prepareContext(ctx).then(
+      () => {
+        const pending = (live) => live.some((fx) => fx.pending);
+        if (pending(this.master.fxLive) || [...this.tracks.values()].some((b) => pending(b.fxLive))) this.rebuildAllChains();
+      },
+      (err) => console.warn(err.message),
+    );
   }
 
   buildMaster() {
@@ -111,6 +131,7 @@ class Engine {
         bundle.input.disconnect();
         bundle.gain.disconnect();
         bundle.pan.disconnect();
+        bundle.comp.disconnect();
         this.tracks.delete(id);
         this.levels.delete(id);
       }
@@ -123,12 +144,16 @@ class Engine {
       const pan = ctx.createStereoPanner();
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 1024;
+      // Plugin delay compensation: every track is held back by however much
+      // less latency its inserts add than the slowest track's (see updateLatency).
+      const comp = ctx.createDelay(MAX_COMPENSATION);
       gain.connect(pan).connect(analyser);
-      pan.connect(this.master.input);
+      pan.connect(comp).connect(this.master.input);
       const bundle = {
         input,
         gain,
         pan,
+        comp,
         analyser,
         buf: new Float32Array(analyser.fftSize),
         fxLive: [],
@@ -167,6 +192,7 @@ class Engine {
     this.rebuildMasterChain();
     this.fxSignature = signatureOf(state.project.master.fx);
     this.updateMix();
+    this.loadWorklets(); // a plugin installed since the context was made may have brought modules
   }
 
   rebuildTrackChain(track, bundle = this.tracks.get(track.id)) {
@@ -191,6 +217,40 @@ class Engine {
     }
     this.master.gain.gain.setTargetAtTime(dbToGain(state.project.master.volumeDb), t0, 0.01);
     syncChainParams(state.project.master.fx, this.master.fxLive);
+    this.updateLatency();
+  }
+
+  /**
+   * Plugin delay compensation.
+   *
+   * A plugin that looks ahead delays its track. Each track is delayed by the
+   * difference between the slowest track's insert latency and its own, so they
+   * all reach the master together. Routing is tracks → master only, which is
+   * what keeps this to one delay per track. What is left — the slowest track
+   * plus the master chain — delays everything alike: `latency.total` is taken
+   * off the playhead, added to the metronome and to the shift applied to
+   * recorded takes, and trimmed from the head of a bounce.
+   */
+  updateLatency() {
+    const own = new Map();
+    let slowest = 0;
+    for (const track of state.project.tracks) {
+      const l = this.livePending(track.id) ? 0 : chainLatency(track.fx);
+      own.set(track.id, l);
+      if (l > slowest) slowest = l;
+    }
+    for (const [id, b] of this.tracks) {
+      const d = Math.min(MAX_COMPENSATION, slowest - (own.get(id) ?? 0));
+      if (Math.abs(b.comp.delayTime.value - d) > 1e-7) b.comp.delayTime.setValueAtTime(d, this.ctx.currentTime);
+    }
+    const master = this.livePending("master") ? 0 : chainLatency(state.project.master.fx);
+    this.latency = { tracks: slowest, master, total: slowest + master };
+  }
+
+  /** True while a chain holds a worklet plugin that is standing in as a passthrough. */
+  livePending(ownerId) {
+    const live = ownerId === "master" ? this.master?.fxLive : this.tracks.get(ownerId)?.fxLive;
+    return !!live?.some((fx) => fx.pending);
   }
 
   /** The live instance of an insert, for UI that reads from it (the tuner). Null when bypassed or not built. */
@@ -207,7 +267,8 @@ class Engine {
 
   get position() {
     if (!this.playing || !this.ctx) return state.playhead;
-    const now = this.ctx.currentTime;
+    // What is being *heard* now left the clips `latency.total` ago.
+    const now = this.ctx.currentTime - this.latency.total;
     const segs = this.segments;
     if (!segs.length) return state.playhead;
     // Inside the short pad before the first segment starts sounding.
@@ -416,7 +477,8 @@ class Engine {
     let k = Math.ceil(p0 / beat - 1e-9);
     for (let t = k * beat; t < p1; t += beat, k++) {
       const isDown = Math.abs(t / bar - Math.round(t / bar)) < 1e-6;
-      const when = ctxAt + (t - p0);
+      // The click skips every insert, so it waits for the mix it is counting.
+      const when = ctxAt + (t - p0) + this.latency.total;
       const osc = this.ctx.createOscillator();
       const g = this.ctx.createGain();
       osc.frequency.value = isDown ? 1600 : 1000;
