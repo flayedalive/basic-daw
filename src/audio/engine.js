@@ -67,7 +67,12 @@ class Engine {
     const splitter = ctx.createChannelSplitter(2);
     const analyserL = ctx.createAnalyser();
     const analyserR = ctx.createAnalyser();
-    analyserL.fftSize = analyserR.fftSize = 2048;
+    // Large enough for the spectrum display's low end (5.9 Hz bins at 48 kHz).
+    // The analyzer reads the two channels separately rather than a mono sum,
+    // which would hide exactly the out-of-phase content it exists to show.
+    analyserL.fftSize = analyserR.fftSize = 8192;
+    analyserL.smoothingTimeConstant = analyserR.smoothingTimeConstant = 0.7;
+    analyserL.minDecibels = analyserR.minDecibels = -120;
     gain.connect(splitter);
     splitter.connect(analyserL, 0);
     splitter.connect(analyserR, 1);

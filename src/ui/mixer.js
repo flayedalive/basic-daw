@@ -3,6 +3,7 @@
 // to the track list or an insert chain rebuilds them.
 
 import { $, el, coalesce, popupMenu, fmtDb, clamp } from "../util.js";
+import { analyzerPanel, updateAnalyzer } from "./analyzer.js";
 import { bus, changed, pushUndo, state, trackById } from "../state.js";
 import { engine } from "../audio/engine.js";
 import { labelOf, newEffect, pluginsByCategory } from "../plugins/registry.js";
@@ -38,7 +39,7 @@ function render() {
   host.replaceChildren();
   strips.clear();
   for (const track of state.project.tracks) host.append(buildStrip(track.id));
-  host.append(buildStrip("master"));
+  host.append(buildStrip("master"), analyzerPanel());
   highlight();
 }
 
@@ -298,6 +299,7 @@ const METER_FLOOR = 60;
 const meterPct = (peak) => (peak <= 0.0001 ? 0 : clamp(1 + (20 * Math.log10(peak)) / METER_FLOOR, 0, 1));
 
 export function updateMixerMeters(levels) {
+  updateAnalyzer();
   for (const [id, s] of strips) {
     const lv = levels.get(id);
     if (!lv) continue;

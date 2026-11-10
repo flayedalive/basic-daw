@@ -98,6 +98,8 @@ Everything runs client-side, so nothing you import ever leaves your machine.
 **Export**
 - Bounce the master, the loop region, or the selection to 16/24-bit or 32-bit
   float WAV at 44.1 / 48 / 96 kHz, with an optional tail and peak normalize
+- A spectrum analyzer and stereo correlation meter beside the master strip
+  (log frequency, optional 4.5 dB/octave tilt)
 - Every bounce ends with a loudness report — integrated LUFS, short-term max,
   loudness range, true peak, PLR (ITU-R BS.1770 / EBU R 128) — and can be
   normalized to a LUFS target instead of to peak, held under -1 dBTP

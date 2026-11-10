@@ -679,6 +679,84 @@ input[type="number"]::-webkit-inner-spin-button {
   background: #191c26;
   border-color: var(--border-lt);
 }
+/* Master analyzer: spectrum + stereo correlation, to the right of the master strip. */
+.strip.analyzer {
+  width: 300px;
+  gap: 4px;
+}
+.strip.analyzer.closed {
+  width: 22px;
+  padding: 4px 1px;
+}
+.strip.analyzer.closed .an-body,
+.strip.analyzer.closed .s-name {
+  display: none;
+}
+.an-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.an-head .s-name {
+  flex: 1;
+  text-align: left;
+  cursor: default;
+  color: var(--fg-dim);
+}
+.an-head .mini.on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.an-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.an-canvas {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  border-radius: 3px;
+}
+.an-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+}
+.an-lab {
+  color: var(--fg-dim);
+}
+.an-row .val {
+  width: 34px;
+  text-align: right;
+}
+.an-corr {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  background: #0d0f14;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.an-corr::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #39405a;
+}
+.an-corr i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 0;
+}
 .strip .s-name {
   font-size: 10px;
   text-align: center;
