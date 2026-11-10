@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>basic-daw tests</title>
+<body>
+<script type="module">
+  import { tests, runAll } from "./lib.js";
+  const spec = new URLSearchParams(location.search).get("spec");
+  let loadError = null;
+  try {
+    await import(`./specs/${spec}`);
+  } catch (err) {
+    loadError = err;
+  }
+  window.__run = async () => (loadError ? [{ name: "(import)", ok: false, error: loadError.stack ?? String(loadError) }] : runAll());
+</script>
+</body>
