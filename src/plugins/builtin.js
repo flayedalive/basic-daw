@@ -21,6 +21,7 @@ import {
 import { tunerPlugin } from "./tuner.js";
 import { ampPlugin, cabPlugin } from "./amp.js";
 import { geq31Plugin } from "./geq31.js";
+import { multibandPlugin } from "./multiband.js";
 
 const P = (key, label, min, max, def, extra = {}) => ({ key, label, min, max, def, ...extra });
 
@@ -491,4 +492,5 @@ export function registerBuiltins() {
   add(ampPlugin);
   add(cabPlugin);
   add(geq31Plugin);
+  add(multibandPlugin);
 }
