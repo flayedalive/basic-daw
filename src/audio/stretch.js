@@ -6,7 +6,7 @@
 // `semitones` shifts pitch without changing length. Pitch shift is a stretch
 // by the pitch ratio followed by resampling back to the wanted length.
 //
-// Three algorithms, because no single one suits everything:
+// Four algorithms, because no single one suits everything:
 //
 //   mono   WSOLA. Copies whole grains of the waveform and overlaps them where
 //          they line up best. Keeps a single voice or instrument intact —
@@ -16,7 +16,11 @@
 //          original speed with the phases reset, so attacks stay sharp.
 //   drums  Cuts at the onsets and moves the slices. Every hit is the original
 //          audio, untouched; only the gaps between hits change.
-//   auto   Picks one of the above by listening to the material.
+//   vocal  PSOLA (audio/pitchshift.js). For one voice: moves pitch and time
+//          by re-spacing the voice's own pulses, so the formants — the shape
+//          of the mouth — stay put. A vocal shifted this way keeps its
+//          character where "mono" would chipmunk it. Only ever chosen by hand.
+//   auto   Picks one of the first three by listening to the material.
 //
 // No DOM and no Web Audio: plain Float32Arrays in and out, so it runs and is
 // tested in Node. The work is written as generators that yield their progress,
@@ -31,8 +35,11 @@ import { fftOf, nextPow2 } from "./fft.js";
 import { resampleTo } from "./resample.js";
 import { detectPitch } from "../plugins/pitch.js";
 import { runToEnd, runSliced } from "./slices.js";
+// A cycle (pitchshift.js borrows WSOLA from here), and a harmless one: each
+// side only calls the other from inside its functions.
+import { vocalStretchGen } from "./pitchshift.js";
 
-export const STRETCH_MODES = ["auto", "mono", "poly", "drums"];
+export const STRETCH_MODES = ["auto", "mono", "poly", "drums", "vocal"];
 export const MIN_RATIO = 0.25;
 export const MAX_RATIO = 4;
 
@@ -550,6 +557,11 @@ export function* stretchGen(channels, sampleRate, opts = {}) {
   const pitch = Math.pow(2, (opts.semitones ?? 0) / 12);
   const n = channels[0].length;
   const outLen = Math.max(1, Math.round(n * ratio));
+  // "vocal" is its own path: PSOLA moves pitch and time in one pass without
+  // resampling, which is what keeps the formants where they were. It is never
+  // picked by "auto" — a voice and a flute look alike from here, and the
+  // choice between keeping and moving formants is the user's.
+  if (opts.mode === "vocal" && (outLen !== n || pitch !== 1)) return yield* vocalStretchGen(channels, sampleRate, { ratio, semitones: opts.semitones ?? 0 });
   // Stretch to the wanted length times the pitch ratio, then read that back
   // `pitch` times as fast: the length comes out right and the pitch has moved.
   const stageLen = Math.max(1, Math.round(n * ratio * pitch));
@@ -557,7 +569,7 @@ export function* stretchGen(channels, sampleRate, opts = {}) {
 
   if (stageLen !== n) {
     const mono = mixdown(channels);
-    const mode = STRETCH_MODES.includes(opts.mode) && opts.mode !== "auto" ? opts.mode : chooseMode(mono, sampleRate);
+    const mode = ["mono", "poly", "drums"].includes(opts.mode) ? opts.mode : chooseMode(mono, sampleRate);
     const total = stageLen / n;
     if (mode === "mono") {
       staged = yield* wsola(channels, mono, sampleRate, (o) => o / total, stageLen);

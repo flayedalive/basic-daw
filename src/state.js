@@ -185,7 +185,7 @@ export function newClip(assetId, trackId, start, opts = {}) {
     // With pitch lock on, `rate` changes length only and `detune` pitch only
     // (a stretched copy is rendered); off, they are one resampling and move together.
     pitchLock: opts.pitchLock ?? false,
-    stretchMode: opts.stretchMode ?? "auto", // auto | mono | poly | drums
+    stretchMode: opts.stretchMode ?? "auto", // auto | mono | poly | drums | vocal
   };
 }
 

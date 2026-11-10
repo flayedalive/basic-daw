@@ -51,8 +51,10 @@ Everything runs client-side, so nothing you import ever leaves your machine.
 - Playback rate and pitch (±24 semitones), reverse, mute
 - Time stretch with pitch lock: speed and pitch change independently. Alt-drag a
   clip edge to stretch it, or set a percentage, a source tempo or a bar count.
-  Four modes — one voice (WSOLA), chords and mixes (phase vocoder with
-  transients preserved), drums (slices moved, hits untouched), or auto
+  Five modes — one voice (WSOLA), chords and mixes (phase vocoder with
+  transients preserved), drums (slices moved, hits untouched), vocal (PSOLA:
+  a voice shifted or stretched keeps its formants, so it still sounds like the
+  same singer), or auto
 - "Match tempo" stretches a clip to a whole number of bars
 - Pitch editor for a sung or played line ("Edit pitch…" on a clip): the notes on
   a piano-roll grid, corrected to a key and scale or dragged where you want
@@ -266,7 +268,8 @@ There is a `/daw-plugin` skill that walks an agent through designing one to spec
   together, like tape. Turn pitch lock on for a time stretch
 - Stretch quality is good within about 0.8–1.25× and degrades beyond it; the
   mono mode moves formants with a pitch shift (a vocal shifted far sounds
-  chipmunked)
+  chipmunked) — use the vocal mode for a single voice, which keeps them, within
+  a few semitones
 - The pitch editor is for one voice or instrument at a time, and for
   corrections within about two semitones. It will not separate chords, and a
   large shift changes the character of the voice. Editing a clip's pitch

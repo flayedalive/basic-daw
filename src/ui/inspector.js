@@ -353,7 +353,7 @@ function setClipRate(c, rate) {
 function stretchNote(clip) {
   if (!clip.pitchLock) return null;
   const p = stretchProgress(clip);
-  const modes = { auto: "picked from the material", mono: "one voice or instrument (WSOLA)", poly: "chords and mixes (phase vocoder)", drums: "slices at the hits" };
+  const modes = { auto: "picked from the material", mono: "one voice or instrument (WSOLA)", poly: "chords and mixes (phase vocoder)", drums: "slices at the hits", vocal: "one voice, formants kept (PSOLA)" };
   const text =
     p === null
       ? `Mode: ${modes[clip.stretchMode ?? "auto"]}. Nothing to stretch at rate 1 and pitch 0.`

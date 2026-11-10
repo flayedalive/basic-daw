@@ -72,6 +72,18 @@ test("reverse and stretch combine", async () => {
   assert(Math.abs(c) < 3, `first note is ${fmt(c)} cents from E`);
 });
 
+test("vocal mode: a clip set to it bounces as the PSOLA stretch, pitch moved and timing kept", async () => {
+  const out = await renderWith(src, [], { clip: { detune: 200, pitchLock: true, stretchMode: "vocal" } });
+  const want = stretch([src.getChannelData(0), src.getChannelData(1)], SR, { ratio: 1, semitones: 2, mode: "vocal" });
+  assert(Math.abs(out.length - src.length) <= 2, "length changed");
+  const d = maxDiff(out.getChannelData(0), want[0], Math.min(out.length, want[0].length));
+  assert(d < -100, `bounce differs from the stretch by ${fmt(d)} dBFS`);
+  const c = cents(pitchAt(out, 0.2), 220);
+  const c2 = cents(pitchAt(out, 1.6), 329.63);
+  assert(Math.abs(c - 200) < 5 && Math.abs(c2 - 200) < 5, `moved ${fmt(c)} and ${fmt(c2)} cents`);
+  return `+${fmt(c, 1)} cents on note 1, +${fmt(c2, 1)} on note 3`;
+});
+
 test("in the app: playback of a stretched clip is the bounce, sample for sample", async () => {
   const win = await openApp();
   const { daw } = win;
@@ -147,6 +159,7 @@ test("in the app: inspector controls and Alt-drag stretch", async () => {
   assert(lock?.checked, "pitch lock checkbox not shown as on");
   const mode = [...body.querySelectorAll("select")].find((s) => [...s.options].some((o) => o.value === "drums"));
   assert(mode, "no stretch mode picker");
+  assert([...mode.options].some((o) => o.value === "vocal"), "no vocal mode in the picker");
   mode.value = "mono";
   mode.dispatchEvent(new win.Event("change"));
   await sleep(50);

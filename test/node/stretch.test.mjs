@@ -2,7 +2,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { stretch, stretchAsync, detectOnsets, chooseMode, internals } from "../../src/audio/stretch.js";
+import { stretch, stretchAsync, detectOnsets, chooseMode, internals, STRETCH_MODES } from "../../src/audio/stretch.js";
 import { detectPitch, refinePitch } from "../../src/plugins/pitch.js";
 import { sine, noise, rng, rms, db, diffDb, tone } from "./helpers.mjs";
 
@@ -274,4 +274,19 @@ test("stretchAsync gives the same result as stretch, yields on the way, and can 
   assert.deepEqual(a[0], b[0]);
   const cancelled = await stretchAsync([x], SR, { ratio: 1.3, mode: "poly" }, { budgetMs: 0, isCancelled: () => true });
   assert.equal(cancelled, null);
+});
+
+test("vocal mode: stretch() hands a single voice to PSOLA, and leaves it alone when nothing moves", async () => {
+  const { vocalStretch } = await import("../../src/audio/pitchshift.js");
+  const { sing } = await import("./voice.mjs");
+  const { x } = sing(1.2, (t) => (t < 0.1 || t > 1.1 ? NaN : 57));
+  assert.ok(STRETCH_MODES.includes("vocal"));
+  const same = stretch([x], 48000, { ratio: 1, mode: "vocal" })[0];
+  assert.deepEqual(same, x, "ratio 1, no shift: should be the input");
+  for (const opts of [{ ratio: 1.25 }, { ratio: 1, semitones: 2 }, { ratio: 0.8, semitones: -1 }]) {
+    const y = stretch([x], 48000, { ...opts, mode: "vocal" })[0];
+    const want = vocalStretch([x], 48000, opts)[0];
+    assert.equal(y.length, Math.round(x.length * opts.ratio));
+    assert.deepEqual(y, want);
+  }
 });
