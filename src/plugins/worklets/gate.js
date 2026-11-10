@@ -9,7 +9,7 @@
 // what makes a bounce identical to playback; a message on the port would
 // arrive whenever the main thread got round to it.
 
-const MAX_LOOKAHEAD = 0.02; // seconds
+const MAX_LOOKAHEAD = 0.02; // seconds of delay line
 
 class GateProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
@@ -19,7 +19,9 @@ class GateProcessor extends AudioWorkletProcessor {
       k("attack", 0.002, 0, 1), // seconds
       k("hold", 0.05, 0, 2),
       k("release", 0.12, 0.001, 5),
-      k("lookahead", 0, 0, MAX_LOOKAHEAD),
+      // In samples, not seconds: the host compensates for this delay, and a whole
+      // number of samples is the one thing both sides can agree on exactly.
+      k("lookahead", 0, 0, 8192),
       k("range", -100, -100, 0), // dB of attenuation when closed; -100 is silence
     ];
   }
@@ -50,7 +52,7 @@ class GateProcessor extends AudioWorkletProcessor {
     const up = coef(params.attack[0]);
     const down = coef(params.release[0]);
     const hold = Math.round(params.hold[0] * sampleRate);
-    const look = Math.min(this.mask - 128, Math.round(params.lookahead[0] * sampleRate));
+    const look = Math.max(0, Math.min(this.mask - 128, Math.round(params.lookahead[0])));
     const floor = params.range[0] <= -99.5 ? 0 : Math.pow(10, params.range[0] / 20);
     const { mask } = this;
     const dL = this.delay[0];

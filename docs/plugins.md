@@ -359,7 +359,7 @@ Two more fields on the spec itself are optional:
 | Key | |
 |---|---|
 | `worklets` | `[{ name, url }]` — AudioWorklet modules the plugin's processors live in. See below. |
-| `latency` | Seconds of delay the plugin adds: a number, or `(params) => seconds`. See [Latency](#latency). |
+| `latency` | Seconds of delay the plugin adds: a number, or `(params, sampleRate) => seconds`. See [Latency](#latency). |
 
 Load one with a `.js` URL in the plugin manager. It asks first, because unlike a
 manifest this executes code. JS plugins are **not** persisted between sessions.
@@ -443,7 +443,7 @@ A plugin that looks ahead delays the signal. Say by how much and the host
 compensates:
 
 ```js
-latency: (p) => p.lookahead / 1000,   // or a plain number: latency: 0.006
+latency: (p, sampleRate) => p.lookahead / 1000,   // or a plain number: latency: 0.006
 ```
 
 - Each track is delayed by the difference between the slowest track's insert

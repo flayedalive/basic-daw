@@ -217,7 +217,7 @@ export async function liveRender(buffer, fx = [], opts = {}) {
   // The engine and the bounce both take a chain's reported latency back out;
   // here that means starting the recording that much after the source.
   const { chainLatency } = await import("../../src/plugins/registry.js");
-  const late = Math.round(chainLatency(defs) * ctx.sampleRate);
+  const late = Math.round(chainLatency(defs, ctx.sampleRate) * ctx.sampleRate);
   const cap = new AudioWorkletNode(ctx, "test-capture", {
     numberOfInputs: 1,
     numberOfOutputs: 1,

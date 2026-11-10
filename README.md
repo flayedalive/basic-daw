@@ -62,10 +62,10 @@ Everything runs client-side, so nothing you import ever leaves your machine.
   value (`-12`, `+3.5`, `-inf`, `L30`, `C`); Alt-click resets
 - CLIP lights on every strip and the master latch when a level reaches
   0 dBFS; click to clear
-- Insert chains on every track and the master, thirty-four effects out of the box:
+- Insert chains on every track and the master, thirty-five effects out of the box:
   4-band EQ (with a live response curve), 10- and 31-band graphic EQs, tilt EQ,
   filter, auto-wah, compressor, 3-band multiband compressor,
-  limiter, noise gate, delay, ping-pong echo, reverb, plate reverb, chorus,
+  true-peak limiter, clipper, noise gate, delay, ping-pong echo, reverb, plate reverb, chorus,
   tremolo, saturator, tube warmth, harmonic exciter, bit crusher, wavefolder, stereo width, Haas
   widener, trim, tuner
 - Plugin delay compensation: an insert that looks ahead (the compressors, a
@@ -110,6 +110,9 @@ Everything runs client-side, so nothing you import ever leaves your machine.
 - Every bounce ends with a loudness report — integrated LUFS, short-term max,
   loudness range, true peak, PLR (ITU-R BS.1770 / EBU R 128) — and can be
   normalized to a LUFS target instead of to peak, held under -1 dBTP
+- Master to a loudness target from the bounce dialog — Streaming (-14 LUFS,
+  -1 dBTP), Loud, Podcast or your own — with a true-peak look-ahead limiter,
+  and a peak-to-loudness floor it will not squash the mix past
 - Export stems: one WAV per track, post-insert, pre-master
 
 **Plugins**
@@ -146,6 +149,7 @@ src/
     effects.js        insert chain wiring (buildChain / disposeChain)
     render.js         OfflineAudioContext bounce, normalize, analysis
     loudness.js       BS.1770 loudness, loudness range, true peak
+    master.js         master a bounce to a loudness target through the limiter
     fft.js            radix-2 FFT
     resample.js       windowed-sinc sample-rate conversion
     stretch.js        time stretch / pitch shift: WSOLA, phase vocoder, drum slicing
@@ -163,7 +167,7 @@ src/
     geq31.js          31-band graphic EQ
     multiband.js      3-band compressor on Linkwitz–Riley crossovers
     worklets.js       loads plugins' AudioWorklet modules into each context
-    dynamics.js       worklet plugins (noise gate)
+    dynamics.js       worklet plugins (noise gate, true-peak limiter)
     worklets/         their AudioWorklet processors
     tuner.js          the tuner insert (registered with the built-ins)
     pitch.js          YIN pitch detection and note naming, DOM-free

@@ -235,7 +235,7 @@ class Engine {
     const own = new Map();
     let slowest = 0;
     for (const track of state.project.tracks) {
-      const l = this.livePending(track.id) ? 0 : chainLatency(track.fx);
+      const l = this.livePending(track.id) ? 0 : chainLatency(track.fx, this.sampleRate);
       own.set(track.id, l);
       if (l > slowest) slowest = l;
     }
@@ -243,7 +243,7 @@ class Engine {
       const d = Math.min(MAX_COMPENSATION, slowest - (own.get(id) ?? 0));
       if (Math.abs(b.comp.delayTime.value - d) > 1e-7) b.comp.delayTime.setValueAtTime(d, this.ctx.currentTime);
     }
-    const master = this.livePending("master") ? 0 : chainLatency(state.project.master.fx);
+    const master = this.livePending("master") ? 0 : chainLatency(state.project.master.fx, this.sampleRate);
     this.latency = { tracks: slowest, master, total: slowest + master };
   }
 

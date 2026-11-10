@@ -38,7 +38,7 @@ test("hold keeps it open for the time asked, then release takes over", () => {
 test("look-ahead delays the audio by exactly that much and opens before the attack", () => {
   const x = burst();
   const start = Math.round(0.2 * SR);
-  const y = run(x, { threshold: -20, attack: 0.001, lookahead: 0.005 });
+  const y = run(x, { threshold: -20, attack: 0.001, lookahead: Math.round(0.005 * SR) }); // the processor takes samples
   const late = Math.round(0.005 * SR);
   // 5 ms is five attack time constants: the gain is within 1% of open when the burst arrives.
   for (let i = 1; i < 40; i++) assert.ok(Math.abs(y[start + late + i] - x[start + i]) < 0.01 * 0.5 + 1e-6, `sample ${i} of the attack is off`);

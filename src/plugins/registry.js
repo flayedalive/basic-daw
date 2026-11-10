@@ -198,17 +198,21 @@ export function createEffect(ctx, def, offline = false) {
   return fx;
 }
 
-/** Seconds of delay one insert adds: 0 when bypassed or missing. */
-export function latencyOf(def) {
+/**
+ * Seconds of delay one insert adds: 0 when bypassed or missing. A plugin whose
+ * delay is a whole number of samples (a look-ahead buffer) needs the sample
+ * rate to say what that is in seconds, so it is passed along.
+ */
+export function latencyOf(def, sampleRate = 48000) {
   if (!def || def.on === false) return 0;
   const plugin = getPlugin(def.type);
   if (!plugin?.latency) return 0;
-  const v = typeof plugin.latency === "function" ? plugin.latency({ ...defaultParams(def.type), ...def.params }) : plugin.latency;
+  const v = typeof plugin.latency === "function" ? plugin.latency({ ...defaultParams(def.type), ...def.params }, sampleRate) : plugin.latency;
   return Number.isFinite(v) && v > 0 ? v : 0;
 }
 
 /** Seconds of delay a whole insert chain adds. */
-export const chainLatency = (fx) => (fx ?? []).reduce((sum, def) => sum + latencyOf(def), 0);
+export const chainLatency = (fx, sampleRate = 48000) => (fx ?? []).reduce((sum, def) => sum + latencyOf(def, sampleRate), 0);
 
 /** Ids in `fx` that have no registered plugin. */
 export function missingPlugins(fx) {

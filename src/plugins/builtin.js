@@ -22,7 +22,7 @@ import { tunerPlugin } from "./tuner.js";
 import { ampPlugin, cabPlugin } from "./amp.js";
 import { geq31Plugin } from "./geq31.js";
 import { multibandPlugin } from "./multiband.js";
-import { gatePlugin } from "./dynamics.js";
+import { gatePlugin, limiterPlugin } from "./dynamics.js";
 
 const P = (key, label, min, max, def, extra = {}) => ({ key, label, min, max, def, ...extra });
 
@@ -135,10 +135,13 @@ export function registerBuiltins() {
   });
 
   add({
+    // The id stays, so projects that already use it sound as they did. It holds
+    // a *sample*-peak ceiling by clipping; "Limiter (true peak)" in dynamics.js
+    // is the one for a master.
     id: "core.limiter",
-    name: "Limiter",
+    name: "Clipper",
     category: "Dynamics",
-    description: "Drive into a fast high-ratio compressor, then soft-clip so the ceiling is a guarantee.",
+    description: "Drive into a fast high-ratio compressor, then soft-clip: a sample-peak ceiling with some grit. For a clean, true-peak ceiling on the master use Limiter (true peak).",
     // A DynamicsCompressorNode delays its signal by 6 ms of look-ahead.
     latency: 0.006,
     params: [
@@ -454,4 +457,5 @@ export function registerBuiltins() {
   add(multibandPlugin);
   // Worklet plugins: their sound follows the signal, which native nodes cannot do.
   add(gatePlugin);
+  add(limiterPlugin);
 }

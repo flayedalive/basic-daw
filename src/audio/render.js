@@ -40,8 +40,8 @@ export async function renderRange(start, end, opts = {}) {
   // Plugin delay compensation, as the engine does it: each track is held back
   // to match the slowest one, and what that and the master chain add to
   // everything is rendered as extra length and cut from the head.
-  const slowest = tracks.reduce((m, t) => Math.max(m, chainLatency(t.fx)), 0);
-  const late = Math.round((slowest + (applyMaster ? chainLatency(project.master.fx) : 0)) * sampleRate);
+  const slowest = tracks.reduce((m, t) => Math.max(m, chainLatency(t.fx, sampleRate)), 0);
+  const late = Math.round((slowest + (applyMaster ? chainLatency(project.master.fx, sampleRate) : 0)) * sampleRate);
   const lead = Math.round(PRE_ROLL * sampleRate);
   const ctx = new OfflineAudioContext(2, lead + late + frames, sampleRate);
   // Worklet plugins need their processor modules in this context before a
@@ -65,7 +65,7 @@ export async function renderRange(start, end, opts = {}) {
     gain.gain.value = dbToGain(track.volumeDb);
     pan.pan.value = clamp(track.pan, -1, 1);
     buildChain(ctx, track.fx, input, gain, true);
-    const hold = slowest - chainLatency(track.fx);
+    const hold = slowest - chainLatency(track.fx, sampleRate);
     if (hold > 1e-7) {
       const comp = ctx.createDelay(Math.max(1, hold + 0.01));
       comp.delayTime.value = hold;

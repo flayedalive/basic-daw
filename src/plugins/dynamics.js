@@ -12,6 +12,13 @@ import { workletNode } from "./worklets.js";
 const P = (key, label, min, max, def, extra = {}) => ({ key, label, min, max, def, ...extra });
 const moduleUrl = (file) => new URL(`./worklets/${file}`, import.meta.url).href;
 
+/**
+ * Milliseconds of look-ahead as a whole number of samples. The processor is
+ * told the samples, and the plugin's reported latency is computed from the
+ * same number — so the two cannot disagree by a rounding.
+ */
+const lookSamples = (ms, sampleRate) => Math.round(((ms ?? 0) / 1000) * sampleRate);
+
 /** A handle whose `update` writes plugin parameters to a worklet's AudioParams through `map`. */
 function workletFx(ctx, offline, name, map) {
   const node = workletNode(ctx, name);
@@ -39,7 +46,7 @@ export const gatePlugin = {
   description:
     "Closes when the level falls below the threshold. Stereo-linked, with hold and an optional look-ahead that opens the gate just before the attack arrives (its delay is compensated).",
   worklets: [{ name: "daw-gate", url: moduleUrl("gate.js") }],
-  latency: (p) => (p.lookahead ?? 0) / 1000,
+  latency: (p, sampleRate) => lookSamples(p.lookahead, sampleRate) / sampleRate,
   params: [
     P("threshold", "Thresh", -80, 0, -45, { unit: "dB" }),
     P("attack", "Attack", 0, 0.1, 0.002, { unit: "s", prec: 3 }),
@@ -54,8 +61,35 @@ export const gatePlugin = {
       attack: p.attack,
       hold: p.hold,
       release: p.release,
-      lookahead: p.lookahead / 1000,
+      lookahead: lookSamples(p.lookahead, ctx.sampleRate),
       range: p.range <= -79.9 ? -100 : p.range,
+    }));
+  },
+};
+
+/** Samples of delay the interpolating peak detector adds on top of the look-ahead (limiter.js: TAPS - 1). */
+const LIMITER_SPAN = 11;
+
+export const limiterPlugin = {
+  id: "core.maximizer",
+  name: "Limiter (true peak)",
+  category: "Dynamics",
+  description:
+    "Look-ahead brickwall limiter for the master. Holds a true-peak ceiling — inter-sample peaks included — by easing the gain down before each peak arrives. Push Gain into it to raise loudness. Its look-ahead is compensated.",
+  worklets: [{ name: "daw-limiter", url: moduleUrl("limiter.js") }],
+  latency: (p, sampleRate) => (lookSamples(p.lookahead, sampleRate) + LIMITER_SPAN) / sampleRate,
+  params: [
+    P("gain", "Gain", 0, 24, 0, { unit: "dB", prec: 1 }),
+    P("ceiling", "Ceiling", -12, 0, -1, { unit: "dBTP", prec: 1, hint: "The highest level the output may reach, measured between samples as well as on them. -1 is the usual choice for streaming." }),
+    P("lookahead", "Look-ahead", 1, 5, 3, { unit: "ms", prec: 1, hint: "How far ahead it sees, and so how gently it can turn down. Longer is smoother on bass; shorter keeps transients sharper." }),
+    P("release", "Release", 10, 1000, 100, { unit: "ms", log: true, prec: 0, hint: "How fast the gain returns after a peak. Sustained limiting is released more slowly than this on its own." }),
+  ],
+  create(ctx, offline) {
+    return workletFx(ctx, offline, "daw-limiter", (p) => ({
+      gain: p.gain,
+      ceiling: p.ceiling,
+      lookahead: lookSamples(p.lookahead, ctx.sampleRate),
+      release: p.release / 1000,
     }));
   },
 };
