@@ -91,16 +91,20 @@ the control. Some conventions from the built-ins:
 
 ## What a plugin cannot add
 
-Two things in the effect editor are not driven by `params`:
+A few things in the effect editor are not driven by `params`:
 
 - **The EQ/filter response curve.** The inspector draws a live magnitude plot,
   but only for `core.eq` and `core.filter` — it is keyed on those ids. A plugin
   cannot supply its own visualiser today.
+- **The graphic EQ slider bank** (`src/ui/geq.js`), mounted for `core.geq31` in
+  place of its 31 slider rows, and as a read-only response curve above the
+  rows of `json.geq10`. A custom view that edits parameters lists their keys as
+  hidden in `renderFx` so they are not drawn twice.
 - **The readout.** A `create` function can return `readout()` and the app uses
   it internally (gain reduction on the compressor and limiter), but there is no
   parameter field that surfaces an arbitrary readout in the editor.
 
-Both are the same missing feature: a plugin-supplied custom panel. If you need
+They are all the same missing feature: a plugin-supplied custom panel. If you need
 one now, it means writing a JS plugin *and* patching `renderFx` in
 `src/ui/inspector.js`.
 

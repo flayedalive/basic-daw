@@ -20,6 +20,7 @@ import {
 } from "./dsp.js";
 import { tunerPlugin } from "./tuner.js";
 import { ampPlugin, cabPlugin } from "./amp.js";
+import { geq31Plugin } from "./geq31.js";
 
 const P = (key, label, min, max, def, extra = {}) => ({ key, label, min, max, def, ...extra });
 
@@ -489,4 +490,5 @@ export function registerBuiltins() {
   // Likewise: the amp is a chain of two dozen nodes and its cabinet loader.
   add(ampPlugin);
   add(cabPlugin);
+  add(geq31Plugin);
 }

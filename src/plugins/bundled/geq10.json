@@ -1,0 +1,294 @@
+{
+  "id": "json.geq10",
+  "name": "Graphic EQ (10-band)",
+  "category": "EQ / Filter",
+  "description": "Ten octave bands at the ISO centre frequencies, \u00b112 dB each. With every band at 0 the signal passes through untouched.",
+  "params": [
+    {
+      "key": "hz31",
+      "label": "31",
+      "min": -12,
+      "max": 12,
+      "def": 0,
+      "unit": "dB",
+      "prec": 1
+    },
+    {
+      "key": "hz63",
+      "label": "63",
+      "min": -12,
+      "max": 12,
+      "def": 0,
+      "unit": "dB",
+      "prec": 1
+    },
+    {
+      "key": "hz125",
+      "label": "125",
+      "min": -12,
+      "max": 12,
+      "def": 0,
+      "unit": "dB",
+      "prec": 1
+    },
+    {
+      "key": "hz250",
+      "label": "250",
+      "min": -12,
+      "max": 12,
+      "def": 0,
+      "unit": "dB",
+      "prec": 1
+    },
+    {
+      "key": "hz500",
+      "label": "500",
+      "min": -12,
+      "max": 12,
+      "def": 0,
+      "unit": "dB",
+      "prec": 1
+    },
+    {
+      "key": "hz1k",
+      "label": "1k",
+      "min": -12,
+      "max": 12,
+      "def": 0,
+      "unit": "dB",
+      "prec": 1
+    },
+    {
+      "key": "hz2k",
+      "label": "2k",
+      "min": -12,
+      "max": 12,
+      "def": 0,
+      "unit": "dB",
+      "prec": 1
+    },
+    {
+      "key": "hz4k",
+      "label": "4k",
+      "min": -12,
+      "max": 12,
+      "def": 0,
+      "unit": "dB",
+      "prec": 1
+    },
+    {
+      "key": "hz8k",
+      "label": "8k",
+      "min": -12,
+      "max": 12,
+      "def": 0,
+      "unit": "dB",
+      "prec": 1
+    },
+    {
+      "key": "hz16k",
+      "label": "16k",
+      "min": -12,
+      "max": 12,
+      "def": 0,
+      "unit": "dB",
+      "prec": 1
+    },
+    {
+      "key": "out",
+      "label": "Output",
+      "min": -12,
+      "max": 12,
+      "def": 0,
+      "unit": "dB",
+      "prec": 1
+    }
+  ],
+  "graph": {
+    "nodes": {
+      "b0": {
+        "type": "biquad",
+        "filter": "peaking"
+      },
+      "b1": {
+        "type": "biquad",
+        "filter": "peaking"
+      },
+      "b2": {
+        "type": "biquad",
+        "filter": "peaking"
+      },
+      "b3": {
+        "type": "biquad",
+        "filter": "peaking"
+      },
+      "b4": {
+        "type": "biquad",
+        "filter": "peaking"
+      },
+      "b5": {
+        "type": "biquad",
+        "filter": "peaking"
+      },
+      "b6": {
+        "type": "biquad",
+        "filter": "peaking"
+      },
+      "b7": {
+        "type": "biquad",
+        "filter": "peaking"
+      },
+      "b8": {
+        "type": "biquad",
+        "filter": "peaking"
+      },
+      "b9": {
+        "type": "biquad",
+        "filter": "peaking"
+      }
+    },
+    "connect": [
+      [
+        "in",
+        "b0",
+        "b1",
+        "b2",
+        "b3",
+        "b4",
+        "b5",
+        "b6",
+        "b7",
+        "b8",
+        "b9",
+        "out"
+      ]
+    ],
+    "bind": [
+      {
+        "to": "b0.frequency",
+        "map": "31.5"
+      },
+      {
+        "to": "b0.Q",
+        "map": "1.414"
+      },
+      {
+        "param": "hz31",
+        "to": "b0.gain"
+      },
+      {
+        "to": "b1.frequency",
+        "map": "63"
+      },
+      {
+        "to": "b1.Q",
+        "map": "1.414"
+      },
+      {
+        "param": "hz63",
+        "to": "b1.gain"
+      },
+      {
+        "to": "b2.frequency",
+        "map": "125"
+      },
+      {
+        "to": "b2.Q",
+        "map": "1.414"
+      },
+      {
+        "param": "hz125",
+        "to": "b2.gain"
+      },
+      {
+        "to": "b3.frequency",
+        "map": "250"
+      },
+      {
+        "to": "b3.Q",
+        "map": "1.414"
+      },
+      {
+        "param": "hz250",
+        "to": "b3.gain"
+      },
+      {
+        "to": "b4.frequency",
+        "map": "500"
+      },
+      {
+        "to": "b4.Q",
+        "map": "1.414"
+      },
+      {
+        "param": "hz500",
+        "to": "b4.gain"
+      },
+      {
+        "to": "b5.frequency",
+        "map": "1000"
+      },
+      {
+        "to": "b5.Q",
+        "map": "1.414"
+      },
+      {
+        "param": "hz1k",
+        "to": "b5.gain"
+      },
+      {
+        "to": "b6.frequency",
+        "map": "2000"
+      },
+      {
+        "to": "b6.Q",
+        "map": "1.414"
+      },
+      {
+        "param": "hz2k",
+        "to": "b6.gain"
+      },
+      {
+        "to": "b7.frequency",
+        "map": "4000"
+      },
+      {
+        "to": "b7.Q",
+        "map": "1.414"
+      },
+      {
+        "param": "hz4k",
+        "to": "b7.gain"
+      },
+      {
+        "to": "b8.frequency",
+        "map": "8000"
+      },
+      {
+        "to": "b8.Q",
+        "map": "1.414"
+      },
+      {
+        "param": "hz8k",
+        "to": "b8.gain"
+      },
+      {
+        "to": "b9.frequency",
+        "map": "16000"
+      },
+      {
+        "to": "b9.Q",
+        "map": "1.414"
+      },
+      {
+        "param": "hz16k",
+        "to": "b9.gain"
+      },
+      {
+        "param": "out",
+        "to": "out.gain",
+        "map": "db2gain(x)"
+      }
+    ]
+  }
+}

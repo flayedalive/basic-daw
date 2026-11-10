@@ -252,3 +252,30 @@ export function dcOf(buf) {
   }
   return s / Math.max(1, n);
 }
+
+/* ── the whole app ────────────────────────────────────────────────────── */
+
+/**
+ * Boot the real app in a full-size iframe and hand back its window once the
+ * debug handle (`daw`) exists. UI specs drive it through `daw` and the DOM.
+ */
+export async function openApp() {
+  document.querySelector("iframe")?.remove();
+  const frame = document.createElement("iframe");
+  frame.src = "/index.html";
+  frame.style.cssText = "position:fixed;inset:0;width:100vw;height:100vh;border:0";
+  document.body.append(frame);
+  for (let i = 0; i < 200; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+    if (frame.contentWindow?.daw) break;
+  }
+  const win = frame.contentWindow;
+  assert(win?.daw, "the app did not boot");
+  win.__errors = [];
+  // "ResizeObserver loop…" is the browser reporting a skipped layout pass, not a fault.
+  win.addEventListener("error", (e) => /ResizeObserver/.test(e.message) || win.__errors.push(e.message));
+  win.addEventListener("unhandledrejection", (e) => win.__errors.push(String(e.reason?.message ?? e.reason)));
+  return win;
+}
+
+export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

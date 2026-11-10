@@ -22,6 +22,8 @@ import { defaultParams, getPlugin, labelOf, newEffect, pluginsByCategory, resolv
 import { sliderRow, parseDb, parsePan } from "./controls.js";
 import { drawPeaks } from "../audio/peaks.js";
 import { tunerDisplay } from "./tuner.js";
+import { geqView } from "./geq.js";
+import { GEQ31_BANDS, GEQ31_Q } from "../plugins/geq31.js";
 
 let body, titleEl;
 let mode = { kind: "none" };
@@ -558,6 +560,12 @@ function chainSection(ownerId, owner) {
 
 /* ── effect editor ────────────────────────────────────────────────────── */
 
+/** The 10-band graphic EQ's bands (bundled/geq10.json), for its response curve. */
+const GEQ10_BANDS = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000].map((hz) => {
+  const label = hz >= 1000 ? `${hz / 1000}k` : String(Math.floor(hz));
+  return { key: `hz${label}`, hz, label };
+});
+
 function renderFx() {
   const owner = mode.ownerId === "master" ? state.project.master : trackById(mode.ownerId);
   const def = owner?.fx.find((f) => f.id === mode.fxId);
@@ -566,8 +574,43 @@ function renderFx() {
   if (!plugin) return renderMissingFx(owner, def);
   titleEl.textContent = plugin.name;
 
+  const kind = resolveId(def.type);
+  // Custom views. A plugin declares parameters and the inspector draws them;
+  // these few are deliberate exceptions, mounted by plugin id.
+  const custom = [];
+  const hidden = new Set(); // parameters a custom view edits instead of a row
+  if (kind === "core.geq31" || kind === "json.geq10") {
+    const bands = kind === "core.geq31" ? GEQ31_BANDS : GEQ10_BANDS;
+    const bank = kind === "core.geq31";
+    if (bank) for (const b of bands) hidden.add(b.key);
+    let began = false;
+    custom.push(
+      geqView({
+        bands,
+        q: bank ? GEQ31_Q : 1.414,
+        params: def.params,
+        interactive: bank,
+        // One undo step per gesture, however many bands the drag crosses. The
+        // panel is not re-rendered until the gesture ends: the view repaints
+        // itself, and a re-render would drop the canvas mid-drag.
+        onBegin: () => {
+          if (!began) pushUndo("graphic EQ");
+          began = true;
+        },
+        onInput: (key, db) => setParam(def, key, db, false),
+        onChange: (key, db) => {
+          def.params[key] = db;
+          engine.updateMix();
+          began = false;
+          changed("mix", true);
+        },
+      }),
+    );
+  }
+
   const rows = [];
   for (const p of plugin.params) {
+    if (hidden.has(p.key)) continue;
     if (p.choices) {
       rows.push(row(p.label, select(p.choices, def.params[p.key], (v) => setParam(def, p.key, v))));
     } else if (p.bool) {
@@ -631,7 +674,6 @@ function renderFx() {
 
   const parts = [head];
   if (plugin.description) parts.push(el("div.insp-empty", null, plugin.description));
-  const kind = resolveId(def.type);
   if (kind === "core.eq" || kind === "core.filter") {
     const canvas = el("canvas.eq-canvas");
     parts.push(canvas);
@@ -640,7 +682,7 @@ function renderFx() {
     requestAnimationFrame(() => paintResponse(canvas, def));
   }
   if (kind === "core.tuner") parts.push(tunerDisplay(mode.ownerId, def.id));
-  body.append(section(plugin.name, ...parts, ...rows));
+  body.append(section(plugin.name, ...parts, ...custom, ...rows));
 }
 
 /**
@@ -692,7 +734,7 @@ function assetRow(p, def) {
   const sel = el("select.select.grow", { onchange: (e) => setParam(def, p.key, e.target.value) });
   sel.append(el("option", { value: "", selected: !current }, "— none —"));
   for (const a of assets.values()) {
-    sel.append(el("option", { value: a.id, selected: a.id === current }, a.missing ? `${a.name} (missing)` : `${a.name} · ${fmtDur(a.duration)}`));
+    sel.append(el("option", { value: a.id, selected: a.id === current, title: fmtDur(a.duration) }, a.missing ? `${a.name} (missing)` : a.name));
   }
   if (current && !assets.has(current)) sel.append(el("option", { value: current, selected: true }, "(not in the pool)"));
   const file = el("input", {

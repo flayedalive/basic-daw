@@ -5,12 +5,13 @@
 //
 //   node test/browser/run.mjs              run every spec
 //   node test/browser/run.mjs amp gate     run specs whose file name matches
+//   SHOTS=/tmp/shots node test/browser/run.mjs ui   also save a screenshot per spec
 //
 // Specs live in test/browser/specs/*.js and run inside the page, importing the
 // app's own modules — so they exercise the real registry, engine and renderer.
 
 import { createServer } from "node:http";
-import { readFile, readdir, mkdtemp, rm } from "node:fs/promises";
+import { readFile, readdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -56,6 +57,7 @@ const chrome = spawn(
     "--use-fake-ui-for-media-stream",
     "--use-fake-device-for-media-stream",
     `--use-file-for-fake-audio-capture=${join(ROOT, "test-audio/bass.wav")}`,
+    "--window-size=1500,950",
     "--remote-debugging-port=0",
     `--user-data-dir=${profile}`,
     "about:blank",
@@ -105,6 +107,10 @@ try {
       out = r.result.value;
     } catch (err) {
       out = [{ name: "(spec failed to load)", ok: false, error: `${err.message}\n${logs.join("\n")}` }];
+    }
+    if (process.env.SHOTS) {
+      const shot = await send("Page.captureScreenshot", { format: "png" }).catch(() => null);
+      if (shot) await writeFile(join(process.env.SHOTS, `${spec.replace(/\.js$/, "")}.png`), Buffer.from(shot.data, "base64"));
     }
     console.log(`\n${spec}`);
     for (const t of out) {
