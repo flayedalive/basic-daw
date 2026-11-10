@@ -197,3 +197,19 @@ export function missingInProject(project) {
   for (const id of missingPlugins(project.master?.fx)) ids.add(id);
   return [...ids];
 }
+
+/**
+ * Pool assets referenced by insert parameters (a cabinet's impulse response),
+ * so the pool can show them as in use even though no clip plays them.
+ */
+export function fxAssetIds(project) {
+  const ids = new Set();
+  const scan = (fx) => {
+    for (const f of fx ?? []) {
+      for (const p of paramsOf(f.type)) if (p.asset && f.params?.[p.key]) ids.add(f.params[p.key]);
+    }
+  };
+  for (const t of project.tracks ?? []) scan(t.fx);
+  scan(project.master?.fx);
+  return ids;
+}

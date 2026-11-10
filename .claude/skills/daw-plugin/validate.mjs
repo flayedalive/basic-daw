@@ -89,7 +89,7 @@ for (const file of files) {
       // only misbehave at the edges of their ranges.
       let updates = 1;
       for (const p of m.params) {
-        const values = p.choices ? p.choices : p.bool ? [true, false, true] : [p.min, (p.min + p.max) / 2, p.max];
+        const values = p.choices ? p.choices : p.bool ? [true, false, true] : p.asset ? ["", "ast_not_in_pool", ""] : [p.min, (p.min + p.max) / 2, p.max];
         for (const v of values) {
           fx.update({ ...defaults, [p.key]: v });
           updates++;

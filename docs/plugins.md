@@ -355,8 +355,9 @@ Declare `rebuildOn: ["someKey"]` if a parameter changes the graph's shape.
 Load one with a `.js` URL in the plugin manager. It asks first, because unlike a
 manifest this executes code. JS plugins are **not** persisted between sessions.
 
-The twelve built-ins in `src/plugins/builtin.js` are all JS plugins and are the
-best reference.
+The built-ins in `src/plugins/builtin.js` are all JS plugins and are the best
+reference; `src/plugins/amp.js` (amp sim, cabinet) is the one to read for a
+larger graph and for a parameter that points at pool audio.
 
 ---
 
@@ -381,7 +382,8 @@ src/plugins/
   graph.js         manifest → live audio graph
   expr.js          the expression compiler (no eval)
   dsp.js           curves and impulse responses, shared by both tiers
-  builtin.js       the twelve effects that ship with the app (the tuner's code is in tuner.js / pitch.js)
+  builtin.js       the JS effects that ship with the app (the tuner's code is in tuner.js / pitch.js)
+  amp.js           amp sim and speaker cabinet, with user impulse responses
   loader.js        install from file / URL / text, persist to IndexedDB
   bundled/         the JSON plugins that ship with the app
 ```

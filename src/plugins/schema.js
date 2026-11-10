@@ -115,7 +115,7 @@ export const IR_KINDS = {
   },
 };
 
-export const PARAM_FIELDS = ["key", "label", "min", "max", "def", "unit", "log", "prec", "choices", "bool", "hint"];
+export const PARAM_FIELDS = ["key", "label", "min", "max", "def", "unit", "log", "prec", "choices", "bool", "asset", "hint"];
 
 /* ── validation ───────────────────────────────────────────────────────── */
 
@@ -177,6 +177,9 @@ export function validateManifest(m) {
       else if (!p.choices.includes(p.def)) E(`${at}.def must be one of ${at}.choices`);
     } else if (p.bool) {
       if (typeof p.def !== "boolean") E(`${at}.def must be true or false for a bool parameter`);
+    } else if (p.asset) {
+      // The value is the id of a pool file; a plugin cannot know one in advance.
+      if (p.def !== "") E(`${at}.def must be "" for an asset parameter (none selected)`);
     } else {
       for (const f of ["min", "max", "def"]) {
         if (typeof p[f] !== "number" || !Number.isFinite(p[f])) E(`${at}.${f} must be a finite number`);

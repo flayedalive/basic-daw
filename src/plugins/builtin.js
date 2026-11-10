@@ -1,4 +1,4 @@
-// The twelve effects that ship with the app, as JS-tier plugins.
+// The effects that ship with the app as JS-tier plugins.
 //
 // These predate the registry and are kept in JS deliberately: several of them
 // do things the JSON tier cannot express (the gate's envelope follower needs a
@@ -19,6 +19,7 @@ import {
   LIMIT_MAX,
 } from "./dsp.js";
 import { tunerPlugin } from "./tuner.js";
+import { ampPlugin, cabPlugin } from "./amp.js";
 
 const P = (key, label, min, max, def, extra = {}) => ({ key, label, min, max, def, ...extra });
 
@@ -485,4 +486,7 @@ export function registerBuiltins() {
 
   // Lives in its own module: the pitch detector is the bulk of it.
   add(tunerPlugin);
+  // Likewise: the amp is a chain of two dozen nodes and its cabinet loader.
+  add(ampPlugin);
+  add(cabPlugin);
 }

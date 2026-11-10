@@ -10,13 +10,14 @@ This page is the mapping from what you declare to what the user sees.
 
 ## How a widget is chosen
 
-The inspector looks at three fields, in this order:
+The inspector looks at four fields, in this order:
 
 | If the parameter has… | You get | Example |
 |---|---|---|
 | `choices` | A dropdown | `{ "key": "mode", "label": "Mode", "choices": ["lowpass", "highpass"], "def": "lowpass" }` |
 | `bool: true` | A checkbox | `{ "key": "cross", "label": "Ping-pong", "bool": true, "def": false }` |
-| neither | A slider with a numeric readout | `{ "key": "freq", "label": "Cutoff", "min": 20, "max": 20000, "def": 1200, "unit": "Hz", "log": true }` |
+| `asset: true` | A pool-file picker with a "Load…" button | `{ "key": "ir", "label": "Cab IR", "asset": true, "def": "" }` |
+| none of them | A slider with a numeric readout | `{ "key": "freq", "label": "Cutoff", "min": 20, "max": 20000, "def": 1200, "unit": "Hz", "log": true }` |
 
 Order matters: `choices` wins over `bool`. Parameters render top to bottom in
 the order you declare them, so put the control someone reaches for first at the
@@ -37,6 +38,7 @@ top.
 | `prec` | sliders | Decimal places in the readout. Without it, precision is chosen from magnitude (see below). |
 | `choices` | dropdowns | A non-empty array of strings. `def` must be one of them. |
 | `bool` | checkboxes | `def` must be `true` or `false`. |
+| `asset` | file pickers | The value is the id of a file in the sample pool, or `""` for none; `def` must be `""`. The id is saved with the project and the audio with the pool, so it survives reload. JS tier only for now: `src/plugins/amp.js` reads the audio with `irBuffer(ctx, id)`, which resamples it to the context's rate (a bounce at another sample rate still matches). The pool lists such a file as in use. |
 | `hint` | all | One line of prose rendered under the control. The only explanation a plugin author gets per-parameter — use it for the non-obvious ones, not for all of them. |
 
 Anything else is reported as a warning at install time, so a misspelled field

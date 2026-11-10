@@ -45,6 +45,9 @@ async function boot() {
   }
 
   bus.on("project", syncButtons);
+  // An insert can reference pool audio (a cabinet IR); push parameters again
+  // once that audio has finished decoding or has been removed.
+  bus.on("assets", () => engine.updateMix());
   // Arming or monitoring a track (or loading a session) re-routes live input.
   for (const evt of ["mix", "tracks", "project"]) bus.on(evt, () => input.syncMonitoring());
   let lastInputError = 0;

@@ -581,6 +581,8 @@ function renderFx() {
           }),
         ),
       );
+    } else if (p.asset) {
+      rows.push(assetRow(p, def));
     } else {
       rows.push(
         sliderRow({
@@ -678,6 +680,32 @@ function renderMissingFx(owner, def) {
       ),
     ),
   );
+}
+
+/**
+ * An `asset` parameter: pick a file from the pool, or load one straight into
+ * it. The stored value is the asset's id, so it survives save and reload with
+ * the pool itself.
+ */
+function assetRow(p, def) {
+  const current = def.params[p.key] ?? "";
+  const sel = el("select.select.grow", { onchange: (e) => setParam(def, p.key, e.target.value) });
+  sel.append(el("option", { value: "", selected: !current }, "— none —"));
+  for (const a of assets.values()) {
+    sel.append(el("option", { value: a.id, selected: a.id === current }, a.missing ? `${a.name} (missing)` : `${a.name} · ${fmtDur(a.duration)}`));
+  }
+  if (current && !assets.has(current)) sel.append(el("option", { value: current, selected: true }, "(not in the pool)"));
+  const file = el("input", {
+    type: "file",
+    accept: "audio/*,.wav,.aif,.aiff,.flac",
+    style: { display: "none" },
+    onchange: async () => {
+      const { importFiles } = await import("../assets.js");
+      const [asset] = await importFiles(file.files);
+      if (asset) setParam(def, p.key, asset.id);
+    },
+  });
+  return row(p.label, sel, btn("Load…", () => file.click()), file);
 }
 
 function setParam(def, key, value, commit = true) {

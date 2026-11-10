@@ -58,13 +58,14 @@ Everything runs client-side, so nothing you import ever leaves your machine.
   value (`-12`, `+3.5`, `-inf`, `L30`, `C`); Alt-click resets
 - CLIP lights on every strip and the master latch when a level reaches
   0 dBFS; click to clear
-- Insert chains on every track and the master, twenty-eight effects out of the box:
+- Insert chains on every track and the master, thirty effects out of the box:
   4-band EQ (with a live response curve), tilt EQ, filter, auto-wah, compressor,
   limiter, noise gate, delay, ping-pong echo, reverb, plate reverb, chorus,
   tremolo, saturator, tube warmth, bit crusher, wavefolder, stereo width, Haas
   widener, trim, tuner
-- A guitar pedal pack among them: overdrive, distortion, fuzz, boost, phaser,
-  flanger, octave-up
+- For guitar: an amp sim (clean / crunch / high gain, tone stack, cabinet) that
+  loads your own cabinet impulse responses, and a pedal pack — overdrive,
+  distortion, fuzz, boost, phaser, flanger, octave-up
 - Bypass, reorder, remove per insert; parameters are smoothed, not stepped
 - New effects are plugins — write one as a JSON manifest, no code (see below)
 
@@ -139,7 +140,8 @@ src/
     graph.js          JSON manifest -> live audio graph
     expr.js           expression compiler for manifests (no eval, ever)
     dsp.js            curves and impulse responses, shared by both tiers
-    builtin.js        the twelve effects written in JS
+    builtin.js        the effects written in JS
+    amp.js            amp sim + cabinet (user impulse responses)
     tuner.js          the tuner insert (registered with the built-ins)
     pitch.js          YIN pitch detection and note naming, DOM-free
     loader.js         install from file / URL / text, persist to IndexedDB
