@@ -6,6 +6,7 @@ import { clamp, dialog, download, el, fmtBytes, fmtDur, toast, uid, $ } from "./
 import { engine } from "./audio/engine.js";
 import { renderRange, finishBounce } from "./audio/render.js";
 import { encodeWav } from "./audio/wav.js";
+import { masterToTarget, MASTER_PRESETS } from "./audio/master.js";
 import { rehydrateAssets, serializeAssets } from "./assets.js";
 import { missingInProject } from "./plugins/registry.js";
 import { getAssetBlob, putAssetBlob, putProject, getProject, listProjects, deleteProject, setMeta, getMeta, storageEstimate } from "./storage/db.js";
@@ -244,6 +245,8 @@ export function bounceDialog(kind) {
   let rate = engine.sampleRate;
   let normalize = "off"; // "off" | "peak" | "lufs"
   let target = -14; // LUFS, when normalizing to loudness
+  // "Master to target": off, or { target, ceiling, plrFloor } for the limiter loop.
+  let master = null;
   let tail = 2;
 
   dialog(
@@ -287,6 +290,38 @@ export function bounceDialog(kind) {
         }),
         el("span.val", null, "LUFS · true peak ≤ -1 dBTP"),
       );
+
+      // Master to a loudness target: the mix is pushed into a true-peak limiter
+      // until it measures on target. Not offered for stems — a stem is not a master.
+      const num = (value, min, max, step, onChange) =>
+        el("input.field", { type: "number", min, max, step, value, style: { width: "64px" }, onchange: (e) => onChange(clamp(Number(e.target.value), min, max)) });
+      const masterFields = el("div", { style: { display: "none" } });
+      const showMaster = () => {
+        masterFields.style.display = master ? "" : "none";
+        masterFields.replaceChildren(
+          ...(master
+            ? [
+                el("div.prow", null, el("label", null, "Loudness"), num(master.target, -30, -5, 0.5, (v) => (master.target = v)), el("span.val", null, "LUFS integrated")),
+                el("div.prow", null, el("label", null, "Ceiling"), num(master.ceiling, -6, 0, 0.1, (v) => (master.ceiling = v)), el("span.val", null, "dBTP true peak")),
+                el(
+                  "div.prow",
+                  { title: "Peak-to-loudness ratio to keep. If the target cannot be reached without squashing the mix flatter than this, it stops here and says how far short it fell." },
+                  el("label", null, "Keep PLR"),
+                  num(master.plrFloor, 3, 20, 0.5, (v) => (master.plrFloor = v)),
+                  el("span.val", null, "dB at least"),
+                ),
+              ]
+            : []),
+        );
+      };
+      const masterRow =
+        kind === "stems"
+          ? null
+          : sel("Master to", [{ v: "off", l: "off" }, ...MASTER_PRESETS.map((p) => ({ v: p.id, l: p.label })), { v: "custom", l: "Custom…" }], "off", (v) => {
+              const preset = MASTER_PRESETS.find((p) => p.id === v);
+              master = v === "off" ? null : { target: preset?.target ?? -14, ceiling: preset?.ceiling ?? -1, plrFloor: 6 };
+              showMaster();
+            });
 
       body.append(
         info,
@@ -335,6 +370,8 @@ export function bounceDialog(kind) {
           },
         ),
         targetRow,
+        masterRow,
+        masterFields,
         progress,
       );
 
@@ -347,7 +384,7 @@ export function bounceDialog(kind) {
             await bounceStems({ start, end, bits, rate, normalize, target, tail, onProgress });
             close();
           } else {
-            const result = await bounceMix({ start, end, bits, rate, normalize, target, tail, onProgress });
+            const result = await bounceMix({ start, end, bits, rate, normalize, target, master, tail, onProgress });
             close();
             loudnessDialog(result);
           }
@@ -371,14 +408,23 @@ export function bounceDialog(kind) {
   );
 }
 
-async function bounceMix({ start, end, bits, rate, normalize, target, tail, onProgress }) {
+async function bounceMix({ start, end, bits, rate, normalize, target, master, tail, onProgress }) {
   const t0 = performance.now();
-  const buffer = await renderRange(start, end, { sampleRate: rate, tailSec: tail, onProgress });
-  const result = finishBounce(buffer, { mode: normalize, target });
+  // With mastering on, the render is the first two thirds of the progress bar.
+  const mix = await renderRange(start, end, { sampleRate: rate, tailSec: tail, onProgress: master ? (p) => onProgress(p * 0.66) : onProgress });
+  let buffer = mix;
+  let result;
+  if (master) {
+    const m = await masterToTarget(mix, { ...master, onPass: (n) => onProgress(Math.min(0.98, 0.66 + n * 0.08)) });
+    buffer = m.buffer;
+    result = { ...m, mode: "master", notes: [`Mastered to ${master.target} LUFS under ${master.ceiling} dBTP with the true-peak limiter.`] };
+  } else {
+    result = { ...finishBounce(buffer, { mode: normalize, target }), mode: normalize, target };
+  }
   const blob = encodeWav(buffer, bits);
   download(blob, `${state.project.name.replace(/[^\w.-]+/g, "_")}.wav`);
   toast(`Bounced ${fmtDur(buffer.duration)} · ${fmtBytes(blob.size)} · ${((performance.now() - t0) / 1000).toFixed(1)}s`, "ok", 5000);
-  return { ...result, mode: normalize, target };
+  return result;
 }
 
 const fmtLu = (v, unit) => (Number.isFinite(v) ? `${v.toFixed(1)} ${unit}` : `-∞ ${unit}`);
@@ -395,7 +441,7 @@ export function loudnessDialog({ report, gainDb, limited, shortfall, mode, targe
       line("Sample peak", fmtLu(report.samplePeakDb, "dBFS")),
       line("PLR", `${report.plr.toFixed(1)} dB`, "Peak to loudness ratio: true peak minus integrated loudness"),
     );
-    if (mode && mode !== "off") body.append(line("Gain applied", `${gainDb >= 0 ? "+" : ""}${gainDb.toFixed(1)} dB`));
+    if (mode && mode !== "off") body.append(line(mode === "master" ? "Gain into limiter" : "Gain applied", `${gainDb >= 0 ? "+" : ""}${gainDb.toFixed(1)} dB`));
     if (passes) body.append(line("Passes", String(passes)));
     if (limited) {
       body.append(
@@ -403,7 +449,13 @@ export function loudnessDialog({ report, gainDb, limited, shortfall, mode, targe
           "div.plug-warn",
           null,
           el("b", null, `${shortfall.toFixed(1)} LU short of ${target} LUFS`),
-          el("div.a-meta", null, "Reaching the target with gain alone would push the true peak over -1 dBTP, so the gain was held back. Use “Master to target” to get there with a limiter."),
+          el(
+            "div.a-meta",
+            null,
+            mode === "master"
+              ? "Getting any closer would squash the mix below the peak-to-loudness ratio you asked to keep. Lower “Keep PLR” to allow it, or make the mix itself denser."
+              : "Reaching the target with gain alone would push the true peak over -1 dBTP, so the gain was held back. Use “Master to” to get there with a limiter.",
+          ),
         ),
       );
     }
